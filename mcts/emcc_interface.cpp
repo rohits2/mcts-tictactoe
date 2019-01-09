@@ -42,7 +42,7 @@ extern "C" long long transposition_table_size(){
 int x_main() {
     Board board;
     MCTSNode node(board, NULL);
-    mcts(&node, 50000);
+    parallel_mcts(&node, 50000);
     printf("%.2f/%u\n", node.rewards, node.visits);
     grid_coord move = node.get_move();
     printf("%d, %d, %d, %d\n", move.m_i, move.m_j, move.i, move.j);
