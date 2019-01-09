@@ -4,7 +4,7 @@
 This is an AI for Recursive Tic-Tac-Toe.
 It uses a variant of MCTS called PUCT.
 MCTS is implemented in C++ and compiled to WASM via Emscripten.
-This page was written in TypeScript/HTML.
+The webapp was written in TypeScript/HTML, and is served via Python3/Sanic.
 ## Where is the code?
 You're looking at it! A write-up is coming soon <a href=""></a>.
 ## What are the rules?
