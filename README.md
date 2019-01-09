@@ -6,7 +6,7 @@ It uses a variant of MCTS called PUCT.
 MCTS is implemented in C++ and compiled to WASM via Emscripten.
 This page was written in TypeScript/HTML.
 ## Where is the code?
-You're looking at it! A write-up is <a href="">here</a>.
+You're looking at it! A write-up is coming soon <a href=""></a>.
 ## What are the rules?
 - The board is a 3×3 grid of supercells.
 - Each supercell contains a normal tic-tac-toe board.
