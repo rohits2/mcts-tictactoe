@@ -1,7 +1,7 @@
 all: lib/game.js lib/grid.js lib/svg.js mcts/mcts.wasm Makefile
 
 clean:
-	rm -f lib/*.js mcts/mcts.wasm mcts/mcts.js mcts/mcts.worker.js
+	rm -f lib/*.js mcts/mcts.wasm mcts/mcts.js mcts/mcts.worker.js mcts/mcts.wast mcts/mcts.wasm.map
 
 docker: all
 	docker build -t mcts-tictactoe .
