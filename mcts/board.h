@@ -59,7 +59,7 @@ template <> struct hash<Board> {
         //There are 81 board cells, each of which encodes 2 bits.
         //We can therefore encode the entire board perfectly in 20.25 bytes.
         //We can XOR each size_t worth of bytes together for a fast hash.
-        unsigned long long hash;
+        unsigned long long hash = 0;
         char *board_arr = (char *)board.board;
         for (int i = 0; i < 81; i++) {
             unsigned long long half_byte;
