@@ -8,7 +8,7 @@ extern "C" int get_move(char grid[9][9], int player, int i, int j) {
     Board board(grid, player, major_tile);
     MCTSNode* node = MCTSNode::get_node(board, NULL);
     if (PROC_COUNT == 1) {
-        mcts(node, 25000);
+        mcts(node, 50000);
     } else {
         parallel_mcts(node, 100000);
     }
@@ -26,7 +26,7 @@ extern "C" policy_vec get_policy(char grid[9][9], int player, int i, int j) {
     Board board(grid, player, major_tile);
     MCTSNode* node = MCTSNode::get_node(board, NULL);
     if (PROC_COUNT == 1) {
-        mcts(node, 25000);
+        mcts(node, 50000);
     } else {
         parallel_mcts(node, 100000);
     }

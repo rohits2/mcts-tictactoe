@@ -1,6 +1,6 @@
 #include "mcts.h"
 
-const float C = 1.4;
+const float C = 0.4;
 const float inf = std::numeric_limits<float>::infinity();
 
 shared_mutex tree_lock;
