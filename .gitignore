@@ -1,0 +1,8 @@
+.vscode
+.git
+lib/*.js
+mcts/mcts.wasm
+mcts/mcts.js
+mcts/mcts.worker.js
+mcts/mcts.wast
+mcts/mcts.wasm.map
