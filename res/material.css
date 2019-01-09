@@ -1,0 +1,214 @@
+@import 'https://fonts.googleapis.com/css?family=Open+Sans';
+* {
+    -webkit-box-sizing: border-box;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Open Sans', sans-serif;
+    line-height: 1.75em;
+    font-size: 16px;
+    background-color: #222;
+    color: #aaa;
+}
+
+p {
+    font-size: 16px;
+}
+
+h1 {
+    font-size: 30px;
+    line-height: 34px;
+}
+
+h2 {
+    font-size: 20px;
+    line-height: 25px;
+}
+
+h3 {
+    font-size: 16px;
+    line-height: 27px;
+    padding-top: 15px;
+    padding-bottom: 15px;
+    /*border-bottom: 1px solid #D8D8D8;
+	border-top: 1px solid #D8D8D8;*/
+}
+
+hr {
+    height: 1px;
+    background-color: #d8d8d8;
+    border: none;
+    width: 100%;
+    margin: 0px;
+}
+
+a[href] {
+    color: #1e8ad6;
+}
+
+a[href]:hover {
+    color: #3ba0e6;
+}
+
+img {
+    max-width: 100%;
+}
+
+li {
+    line-height: 1.5em;
+}
+
+aside, [class *="sidebar"], [id *="sidebar"] {
+    max-width: 90%;
+    margin: 0 auto;
+    border: 1px solid lightgrey;
+    padding: 5px 15px;
+}
+
+button {
+    padding: 5px 5px 5px 5px;
+}
+
+@media (min-width: 1921px) {
+    body {
+        font-size: 18px;
+    }
+}
+
+.container {
+    display: flex;
+    /* establish flex container */
+    flex-direction: row;
+    /* default value; can be omitted */
+    flex-wrap: wrap;
+    /* default value; can be omitted */
+    justify-content: space-between;
+    /* switched from default (flex-start, see below) */
+    height: 97%;
+}
+
+.xbutton {
+    vertical-align: middle;
+    background-color: #FF9933;
+    border-radius: 5px;
+    border: none;
+    color: black;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    /*text-shadow: 1px 1px 1px black;*/
+    display: inline-block;
+    font-size: 16px;
+}
+
+.xbutton:hover {
+    background-color: #EE8822;
+    cursor: grab;
+}
+
+.hintbutton {
+    vertical-align: middle;
+    background-color: #33CC33;
+    border-radius: 5px;
+    border: none;
+    color: black;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    /*text-shadow: 1px 1px 1px black;*/
+    display: inline-block;
+    font-size: 16px;
+}
+
+.hintbutton:hover {
+    background-color: #22BB22;
+}
+
+.obutton {
+    vertical-align: middle;
+    background-color: #3399FF;
+    border-radius: 5px;
+    border: none;
+    color: black;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    /*text-shadow: 1px 1px 1px black;*/
+    display: inline-block;
+    font-size: 16px;
+}
+
+.obutton:hover {
+    background-color: #2288EE;
+    cursor: grab;
+}
+
+summary {
+    display: block;
+}
+
+summary:before {
+    content: "+";
+    color: #fff;
+    float: left;
+    font-size: 1.5em;
+    font-weight: bold;
+    margin: -5px 10px 0 0;
+    padding: 0;
+    text-align: right;
+    height: 70px;
+}
+
+details[open] summary:before {
+    content: "-";
+    height: 1000px;
+}
+
+.lds-dual-ring {
+    visibility: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    text-align: center;
+    width: 256px;
+    height: 256px;
+    padding: 10px;
+}
+
+.lds-dual-ring:after {
+    content: " ";
+    display: block;
+    text-align: center;
+    width: 256px;
+    height: 256px;
+    margin: 1px;
+    border-radius: 50%;
+    border: 5px solid #fff;
+    border-color: #fff transparent #fff transparent;
+    animation: lds-dual-ring 1s linear infinite;
+}
+
+@keyframes lds-dual-ring {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+#explainer {
+    width: fit-content;
+    flex-shrink: 0;
+    padding: 10px;
+}
+
+.title {
+    text-align: center;
+}
+
+#svg-holder {
+    flex: 1;
+    min-width: 40%;
+    max-height: 95%;
+}
