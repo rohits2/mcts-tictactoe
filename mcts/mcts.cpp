@@ -18,7 +18,6 @@ MCTSNode *MCTSNode::get_node(const Board &new_board, MCTSNode *new_parent) {
     tree_lock.lock();
     total_lookups++;
     if (transposition_table.find(new_board) != transposition_table.end()) {
-        // printf("Found state in transposition table!\n");
         MCTSNode *node = transposition_table[new_board];
         if (new_parent != NULL) {
             node->parent = new_parent;
@@ -28,7 +27,6 @@ MCTSNode *MCTSNode::get_node(const Board &new_board, MCTSNode *new_parent) {
         total_hits++;
         return node;
     }
-    // printf("Did not find state in transposition table!\n");
     MCTSNode *node = new MCTSNode(new_board, new_parent);
     node->ref_count++;
     auto entry = pair<Board, MCTSNode *>(new_board, node);
@@ -85,7 +83,6 @@ policy_vec MCTSNode::get_policy() const {
 }
 
 MCTSNode::~MCTSNode() {
-    //printf("Destructor %p (expanded %d)\n", this, expanded);
     tree_lock.lock();
     if (transposition_table.find(this->board) == transposition_table.end()) {
         printf("[CRITICAL] Double delete of node detected! (entry does not exist in transposition table)!");
@@ -156,7 +153,6 @@ void MCTSNode::prune_children() {
         }
         if (prunable) {
             child->filicide();
-            //printf("Deleting subtree (strictly worse)...");
         }
     }
     lock.unlock();
@@ -165,12 +161,10 @@ void MCTSNode::prune_children() {
 void MCTSNode::filicide() {
     lock.lock();
     if (!expanded) {
-        //printf("Node ordered to commit filicide, but no children!\n");
         lock.unlock();
         return;
     }
     for (MCTSNode *child : children) {
-        //printf("Child %p (expanded %d)\n", child, child->expanded);
         child->guarded_delete();
     }
     children.clear();
@@ -199,7 +193,6 @@ void MCTSNode::prune_ancestors(MCTSNode *node_to_keep) {
         if (child == node_to_keep) {
             continue;
         }
-        //printf("Internal node committed filicide!\n");
         child->filicide();
     }
     lock.unlock();
