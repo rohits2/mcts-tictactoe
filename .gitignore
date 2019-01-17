@@ -6,3 +6,6 @@ mcts/mcts.js
 mcts/mcts.worker.js
 mcts/mcts.wast
 mcts/mcts.wasm.map
+mcts/libmcts\.so
+
+mcts/mcts
