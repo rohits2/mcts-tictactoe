@@ -13,8 +13,8 @@ extern "C" int get_move(char grid[9][9], int player, int i, int j) {
         parallel_mcts(node, 100000);
     }
     printf("Overall transposition hitrate: %f\n", transposition_hitrate());
-    node->prune_children();
-    node->prune_ancestors();
+    //node->prune_children();
+    //node->prune_ancestors();
     grid_coord move = node->get_move();
     int i_move = (move.m_i << 24) | (move.m_j << 16) | (move.i << 8) | move.j;
     node->guarded_delete();
@@ -43,7 +43,7 @@ int x_main() {
     Board board;
     MCTSNode node(board, NULL);
     parallel_mcts(&node, 50000);
-    printf("%.2f/%u\n", node.rewards, node.visits);
+    printf("%u/%u\n", node.wins, node.visits);
     grid_coord move = node.get_move();
     printf("%d, %d, %d, %d\n", move.m_i, move.m_j, move.i, move.j);
     return 0;
