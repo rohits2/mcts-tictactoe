@@ -30,10 +30,12 @@ class MCTSNode {
     vector<MCTSNode *> children;
     vector<grid_coord> moves;
     unsigned visits = 0;
-    float rewards = 0;
+    unsigned wins = 0;
+    unsigned ties = 0;
     bool expanded = false;
     mutable recursive_mutex lock;
     float Q();
+    float parent_Q();
     float U();
     float PUCT();
     int ref_count = 0;

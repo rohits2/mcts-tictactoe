@@ -1,6 +1,7 @@
 #include "mcts.h"
 
-const float C = 0.4;
+const float C = 1.44;
+const float TIE_REWARD = 0.5;
 const float inf = std::numeric_limits<float>::infinity();
 
 shared_mutex tree_lock;
@@ -36,11 +37,18 @@ MCTSNode *MCTSNode::get_node(const Board &new_board, MCTSNode *new_parent) {
 }
 
 float MCTSNode::Q() {
-    lock.lock();
-    float sum = 1.0f + (float)visits;
-    float res = rewards / (1.0 + visits);
+    lock.lock(); //
+    float sum = wins + TIE_REWARD * ties;
+    float res = sum / (1.0f + visits);
     lock.unlock();
     return res;
+}
+
+float MCTSNode::parent_Q() {
+    unsigned losses = visits - wins - ties;
+    float loss = losses / (1.0f + visits);
+    float tie = TIE_REWARD * ties / (1.0f + visits);
+    return loss + tie;
 }
 
 float MCTSNode::U() { return C * sqrt((float)parent->visits) / (1.0 + visits); }
@@ -48,7 +56,8 @@ float MCTSNode::U() { return C * sqrt((float)parent->visits) / (1.0 + visits); }
 float MCTSNode::PUCT() { return Q() + U(); }
 
 grid_coord MCTSNode::get_move() const {
-    float best_Q = -inf;
+    float best_Q = inf;
+    int best_visits = 0;
     grid_coord best_move = {-1, -1, -1, -1};
     if (!expanded) {
         return best_move;
@@ -56,12 +65,19 @@ grid_coord MCTSNode::get_move() const {
     lock.lock();
     for (int i = 0; i < children.size(); i++) {
         MCTSNode *child = children[i];
-        float Q = 1 - child->Q();
-        if (Q > best_Q) {
+        float Q = child->Q();
+        printf("N%d/%d - %f ", i, child->visits, Q);
+        if (Q < best_Q) {
             best_Q = Q;
+            best_visits = child->visits;
+            best_move = moves[i];
+        } else if (Q == best_Q && child->visits > best_visits) {
+            best_Q = Q;
+            best_visits = child->visits;
             best_move = moves[i];
         }
     }
+    printf("\n");
     lock.unlock();
     return best_move;
 }
@@ -121,6 +137,7 @@ MCTSNode *MCTSNode::select() {
         node->lock.unlock();
         node = new_node;
     };
+    node->visits++;
     return node;
 }
 
@@ -189,11 +206,13 @@ void MCTSNode::prune_ancestors(MCTSNode *node_to_keep) {
         lock.unlock();
         return;
     }
-    for (MCTSNode *child : children) {
-        if (child == node_to_keep) {
-            continue;
+    if (this != node_to_keep) {
+        for (MCTSNode *child : children) {
+            if (child == node_to_keep) {
+                continue;
+            }
+            child->filicide();
         }
-        child->filicide();
     }
     lock.unlock();
     if (parent != NULL) {
@@ -224,9 +243,9 @@ void MCTSNode::backpropagate(const Board &board) {
     while (node != NULL) {
         node->lock.lock();
         if (winner == node->board.player) {
-            node->rewards += 1;
+            node->wins += 1;
         } else if (winner == PLAYER_TIE) {
-            node->rewards += 0.5;
+            node->ties += 1;
         }
         node->lock.unlock();
         node = node->parent;
