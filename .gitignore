@@ -6,3 +6,4 @@ mcts/mcts.js
 mcts/mcts.worker.js
 mcts/mcts.wast
 mcts/mcts.wasm.map
+\.mypy_cache/
