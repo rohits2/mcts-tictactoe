@@ -5,7 +5,7 @@
 #include <tuple>
 #include <vector>
 
-using std::vector, std::tuple, std::get, std::cout, std::endl, std::hash;
+using std::vector, std::tuple, std::get, std::cout, std::endl, std::hash, std::cout, std::endl;
 typedef struct _grid_coord {
     int m_i;
     int m_j;
