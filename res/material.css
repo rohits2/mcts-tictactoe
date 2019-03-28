@@ -212,3 +212,19 @@ details[open] summary:before {
     min-width: 55%;
     max-height: 95%;
 }
+
+.ct-label {
+    fill: rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.4);
+    !important font-size: 0.75rem;
+    line-height: 1;
+}
+
+.series-x {
+    stroke: #FF9933;
+}
+
+.series-o {
+    stroke: #2288EE;
+}
+

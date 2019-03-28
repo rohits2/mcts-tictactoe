@@ -1,14 +1,23 @@
-var getMove =
-    cwrap('get_move', 'number', ['array', 'number', 'number', 'number']);
+var getMove = cwrap('get_move', 'number', ['array', 'number', 'number', 'number']);
 var getTranspositionSize = cwrap('transposition_table_size', 'number', []);
+var getValue = cwrap('get_value', 'number', ['array', 'number', 'number', 'number']);
 var board;
 var gridDiv;
+var chart;
+var xScores = [];
+var oScores = [];
+var mctsInitialized = false;
+
+
 /**
  * Set up the board and SVG holders.
  */
 function init() {
   board = new Board();
   gridDiv = document.getElementById('svg-holder');
+  player = PLAYER_X;
+  xScores = [];
+  oScores = [];
   draw();
 }
 /**
@@ -16,11 +25,17 @@ function init() {
  */
 function initO() {
   board = new Board();
+
   var iMove = getMove(board.board, board.player, -1, -1);
   let [cI, cJ, cII, cJJ] = [
     iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF
   ];  // Ugly bitpacking hack because I am so sick of JS
+
+  xScores = [];
+  oScores = [];
+
   board.move(cI, cJ, cII, cJJ);
+
   gridDiv = document.getElementById('svg-holder');
   draw();
 }
@@ -79,6 +94,7 @@ function linkMoves(grid) {
     let [i, j, ii, jj] = move;
     let box = document.getElementById(i + ' ' + j + ' ' + ii + ' ' + jj);
     box.addEventListener('click', () => {
+      drawScores();
       board.move(i, j, ii, jj);
       document.getElementById('loading').style.visibility = 'visible';
       var grid = new Grid();
@@ -89,11 +105,11 @@ function linkMoves(grid) {
       // The actual move is computed in a callback, to give the display a chance
       // to update.
       window.requestAnimationFrame(
-          () =>
-              window
-                  .requestAnimationFrame(  // Allow at least one frame to elapse
-                                           // between the animation call
-                      () => {computerMove(grid)}, 16));
+        () =>
+          window
+            .requestAnimationFrame(  // Allow at least one frame to elapse
+              // between the animation call
+              () => { computerMove(grid) }, 16));
     });
   });
 }
@@ -110,8 +126,12 @@ function computerMove(grid) {
   }
   var iMove = getMove(board.board, board.player, oI, oJ);
   [cI, cJ, cII, cJJ] =
-      [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
+    [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
+
+  drawScores();
+
   board.move(cI, cJ, cII, cJJ);
+
   draw();
   document.getElementById('loading').style.visibility = 'hidden';
 }
@@ -128,4 +148,69 @@ function draw() {
   drawMoves(grid);
   gridDiv.innerHTML = grid.render();
   linkMoves(grid);
+}
+
+function range(size, startAt = 0) {
+  return [...Array(size).keys()].map(i => i + startAt);
+}
+
+function drawScores() {
+  let scoreDiv = document.getElementById('score-chart');
+  scoreDiv.innerHTML = "";
+
+
+  let [oI, oJ] = [-1, -1];
+  if (board.majorTile != null) {
+    [oI, oJ] = board.majorTile;
+  }
+  // Ensure that the MCTS engine has some data so that the first x-score is not 0.
+  if(!mctsInitialized){
+    mctsInitialized = true;
+    getMove(board.board, board.player, oI, oJ);
+  }
+
+  var iScore = getValue(board.board, board.player, oI, oJ);
+
+  if (board.player == PLAYER_X) {
+    xScores.push(iScore);
+    oScores.push(null);
+  } else if (board.player == PLAYER_O) {
+    oScores.push(iScore);
+    xScores.push(null);
+  }
+
+  chart = new Chartist.Line('.score-chart', {
+    labels: range(xScores.length, 1),
+    series: [
+      {
+        className: "series-x",
+        name: "X",
+        data: xScores
+      },
+      {
+        className: "series-o",
+        name: "O",
+        data: oScores
+      }
+    ]
+  }, {
+      height: "200px",
+      width: "auto",
+      chartPadding: {
+        right: 10
+      },
+      lineSmooth: Chartist.Interpolation.cardinal({
+        fillHoles: true,
+      }),
+      axisX: {
+        showLabel: false,
+        offset: 0
+      },
+      axisY: {
+        type: Chartist.FixedScaleAxis,
+        low: 0,
+        high: 1.25,
+        divisor: 5
+      }
+    });
 }

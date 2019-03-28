@@ -15,8 +15,10 @@ shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, shared_ptr<MCTSN
             return get_node(new_board, new_parent);
         }
         shared_ptr<MCTSNode> node = wk_node.lock();
-        if (node->parents.size() == 0) {
+        if (node->parents.size() == 0 && new_parent != nullptr) {
             printf("Unrooting!\n");
+            auto itr = find(roots.begin(), roots.end(), node);
+            roots.erase(itr);
         }
         if (new_parent != nullptr) {
             node->parents.push_back(new_parent);
@@ -37,9 +39,32 @@ shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, shared_ptr<MCTSN
     return node;
 }
 
+void MCTSTree::prune(unsigned max_size) {
+    tree_lock.lock();
+    queue<shared_ptr<MCTSNode>> inspection_queue;
+    for (shared_ptr<MCTSNode> root : roots) {
+        inspection_queue.push(root);
+    }
+    while (transposition_table.size() > max_size) {
+        shared_ptr<MCTSNode> node = inspection_queue.front();
+        inspection_queue.pop();
+        unsigned max_visits = 0;
+        for (auto child : node->children) {
+            max_visits = max_visits > node->visits ? max_visits : node->visits;
+        }
+        for (auto child : node->children) {
+            if (child->visits <= max_visits) {
+                child->filicide();
+            }
+        }
+    }
+    tree_lock.unlock();
+}
+
 float MCTSTree::transposition_hitrate() { return total_hits / ((float)total_lookups); }
 
 int MCTSTree::transposition_size() { return transposition_table.size(); }
+long long MCTSTree::purges() { return total_fillicides; }
 
 MCTSNode::MCTSNode(const Board &new_board, shared_ptr<MCTSNode> new_parent, MCTSTree *host) {
     board = new_board;
@@ -87,10 +112,12 @@ grid_coord MCTSNode::get_move() const {
         return best_move;
     }
     lock.lock();
+    printf("--- Move enumeration ---\n");
     for (int i = 0; i < children.size(); i++) {
         shared_ptr<MCTSNode> child = children[i];
         float Q = child->Q();
-        printf("N%d/%d - %f ", i, child->visits, Q);
+        printf("N(%d, %d, %d, %d)/%d - valued by %d as %f \n ", moves[i].m_i, moves[i].m_j, moves[i].i, moves[i].j,
+               child->visits, child->board.player, Q);
         if (Q < best_Q) {
             best_Q = Q;
             best_visits = child->visits;
@@ -101,7 +128,7 @@ grid_coord MCTSNode::get_move() const {
             best_move = moves[i];
         }
     }
-    printf("\n");
+    printf("----\n");
     lock.unlock();
     return best_move;
 }
@@ -140,7 +167,6 @@ shared_ptr<MCTSNode> MCTSNode::max_PUCT() {
 vector<shared_ptr<MCTSNode>> MCTSNode::select() {
     vector<shared_ptr<MCTSNode>> path;
     path.reserve(64);
-    // printf("%p\n", this);
     shared_ptr<MCTSNode> cur_node = shared_from_this();
     while (cur_node->expanded) {
         path.push_back(cur_node);
@@ -155,18 +181,7 @@ vector<shared_ptr<MCTSNode>> MCTSNode::select() {
     return path;
 }
 
-void MCTSNode::prune_ancestors() {
-    lock.lock();
-    for (weak_ptr<MCTSNode> wk_parent : parents) {
-        if (wk_parent.expired()) {
-            continue;
-        }
-        shared_ptr<MCTSNode> parent = wk_parent.lock();
-        parent->prune_ancestors(shared_from_this());
-    }
-
-    lock.unlock();
-}
+void MCTSNode::prune_ancestors() { prune_ancestors(shared_from_this()); }
 void MCTSNode::prune_children() {
     lock.lock();
     vector<float> Qs;
@@ -175,7 +190,7 @@ void MCTSNode::prune_children() {
     }
     for (int i = 0; i < children.size(); i++) {
         auto child = children[i];
-        float QU = (1 - child->Q()) + child->Q();
+        float QU = child->Q() + child->U();
         bool prunable = false;
         for (int j = 0; j < i; j++) {
             if (QU < Qs[j]) {
@@ -207,10 +222,6 @@ void MCTSNode::filicide() {
 
 void MCTSNode::prune_ancestors(shared_ptr<MCTSNode> node_to_keep) {
     lock.lock();
-    if (!expanded) {
-        lock.unlock();
-        return;
-    }
     if (shared_from_this() != node_to_keep) {
         for (shared_ptr<MCTSNode> child : children) {
             if (child == node_to_keep) {
@@ -220,9 +231,11 @@ void MCTSNode::prune_ancestors(shared_ptr<MCTSNode> node_to_keep) {
         }
     }
     lock.unlock();
-    for (weak_ptr<MCTSNode> wk_parent : parents) {
+    for (int i = 0; i < parents.size(); i++) {
+        auto wk_parent = parents[i];
         if (wk_parent.expired()) {
-            printf("Dead parent found in prune_ancestors!\n");
+            parents.erase(parents.begin() + i);
+            i--;
             continue;
         }
         shared_ptr<MCTSNode> parent = wk_parent.lock();
@@ -249,9 +262,7 @@ void MCTSNode::expand() {
 
 void MCTSNode::backpropagate(const Board &board, vector<shared_ptr<MCTSNode>> path) {
     int winner = board.game_winner();
-    // printf("PATH %zu/%p\n", path.size(), path.back().get());
     for (shared_ptr<MCTSNode> &node : path) {
-        // printf("BACK %p\n", node.get());
         node->lock.lock();
         if (winner == node->board.player) {
             node->wins += 1;
@@ -273,17 +284,16 @@ Board simulate(const Board &board) {
     return new_board;
 }
 
-// float transposition_hitrate() { return ((float)total_hits) / total_lookups; }
-
-// float transposition_size() { return transposition_table.size(); }
+MCTSNode::~MCTSNode() {
+    tree->total_fillicides++;
+    tree->transposition_table.erase(tree->transposition_table.find(board));
+}
 
 void MCTSTree::mcts(const Board &board, int num_iterations) {
     shared_ptr<MCTSNode> node = get_node(board, nullptr);
     for (int it = 0; it < num_iterations; it++) {
-        // printf("%d/%ld %p\n", it, node.use_count(), node.get());
         vector<shared_ptr<MCTSNode>> path = node->select();
         shared_ptr<MCTSNode> leaf = path.back();
-        // printf("LAST %p\n", leaf.get());
         auto board = simulate(leaf->board);
         leaf->backpropagate(board, path);
         if (leaf->board.game_winner() == PLAYER_NONE) {

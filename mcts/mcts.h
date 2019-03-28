@@ -15,7 +15,7 @@
 #include <vector>
 
 using std::thread, std::unordered_map, std::find, std::shared_ptr, std::weak_ptr, std::pair, std::recursive_mutex,
-    std::queue, std::uniform_int_distribution, std::min, std::make_shared, std::enable_shared_from_this, std::sqrt;
+    std::queue, std::uniform_int_distribution, std::min, std::make_shared, std::enable_shared_from_this, std::sqrt, std::find;
 
 typedef struct _float_grid_wrapper {
     float policy[9][9];
@@ -30,11 +30,14 @@ class MCTSTree {
     unordered_map<Board, weak_ptr<MCTSNode>> transposition_table;
     long long total_lookups = 0;
     long long total_hits = 0;
+    long long total_fillicides = 0;
     shared_ptr<MCTSNode> get_node(const Board &new_board, shared_ptr<MCTSNode> new_parent);
     float transposition_hitrate();
     int transposition_size();
+    long long purges();
     void mcts(const Board &board, int num_iterations);
     void parallel_mcts(const Board &board, int num_iterations);
+    void prune(unsigned max_size);
 };
 
 class MCTSNode : public enable_shared_from_this<MCTSNode> {
@@ -65,6 +68,7 @@ class MCTSNode : public enable_shared_from_this<MCTSNode> {
     grid_coord get_move() const;
     policy_vec get_policy() const;
     MCTSNode(const Board &board, shared_ptr<MCTSNode> parent, MCTSTree *host);
+    ~MCTSNode();
 };
 
 #endif

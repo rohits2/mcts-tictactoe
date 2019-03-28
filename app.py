@@ -12,6 +12,8 @@ app.static('mcts/mcts.wasm.map', './mcts/mcts.wasm.map')
 app.static('/lib/game.js', './lib/game.js')
 app.static('/lib/grid.js', './lib/grid.js')
 app.static('/lib/svg.js', './lib/svg.js')
+app.static('/lib/chartist.js', './lib/chartist-js/dist/chartist.js')
+app.static('/lib/chartist.css', './lib/chartist-js/dist/chartist.css')
 with open("res/index.htm") as f:
     index_html = f.read()
 with open("res/500.htm") as f:

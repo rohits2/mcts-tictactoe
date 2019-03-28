@@ -2,9 +2,11 @@
 <html lang="en">
 
 <head>
+    <link rel="stylesheet" href="/lib/chartist.css">
     <link rel="stylesheet" href="/res/material.css">
     <link rel="icon" href="/res/favicon.png" sizes="any" type="image/svg+xml">
     <title>Recursive Tic-Tac-Toe</title>
+    <script src="/lib/chartist.js" type="text/javascript"></script>
     <script src="/lib/svg.js" type="text/javascript"></script>
     <script src="/lib/grid.js" type="text/javascript"></script>
     <script src="/lib/game.js" type="text/javascript"></script>
@@ -27,6 +29,8 @@
             It uses a variant of MCTS called PUCT.<br>
             MCTS is implemented in C++ and compiled to WASM via Emscripten.<br>
             This page was written in TypeScript/HTML.
+            <h2>Win Probabilities</h2>
+            <div class="score-chart" id="score-chart">No data yet!</div>
             <h2>Where is the code?</h2>
             The code is on <a href="https://github.com/rohits2/mcts-tictactoe">GitHub</a>. A write-up is coming soon<a href=""></a>.
             <h2>What are the rules?</h2>

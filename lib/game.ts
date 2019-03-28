@@ -73,7 +73,6 @@ function subgridWinner(grid: Int8Array, m_i: number, m_j: number) {
   if (diagSum1 == 3 * PLAYER_O || diagSum2 == 3 * PLAYER_O) {
     return PLAYER_O;
   }
-  // printf("NZC %d\n", nonzero_count);
   if (nonzeroCount == 3 * 3) {
     return PLAYER_TIE;
   }
@@ -101,7 +100,7 @@ class Board {
   }
   isValidMove(i, j, ii, jj) {
     if (this.majorTile == null) {
-      return this.getCell(i, j, ii, jj) == PLAYER_NONE;
+      return this.getCell(i, j, ii, jj) == PLAYER_NONE && this.getSupergridCell(i, j) == PLAYER_NONE;
     }
     let [mI, mJ] = this.majorTile
     return (mI == i && mJ == j) &&
