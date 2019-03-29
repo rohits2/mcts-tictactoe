@@ -1,0 +1,3 @@
+[submodule "lib/chartist-js"]
+	path = lib/chartist-js
+	url = git@github.com:gionkunz/chartist-js.git
