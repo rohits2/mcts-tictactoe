@@ -1,4 +1,4 @@
-all: lib/game.js lib/grid.js lib/svg.js mcts/mcts.wasm Makefile
+all: lib/game.js lib/grid.js lib/svg.js mcts/mcts.wasm Makefile lib/chartist-js/.git
 
 clean:
 	rm -f lib/*.js mcts/mcts.wasm mcts/mcts.js mcts/mcts.worker.js mcts/mcts.wast mcts/mcts.wasm.map
@@ -34,3 +34,6 @@ mcts/libmcts.so: mcts/board.cpp mcts/board.h mcts/emcc_interface.cpp mcts/mcts.c
 
 binary-test: mcts/board.cpp mcts/board.h mcts/emcc_interface.cpp mcts/mcts.cpp mcts/mcts.h
 	clang++ -DPROC_COUNT=$$(grep -c ^processor /proc/cpuinfo) -lpthread -lm -std=c++17 -O0 -g -o mcts/bin mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp
+
+lib/chartist-js/.git:
+	git submodule update --init --recursive
