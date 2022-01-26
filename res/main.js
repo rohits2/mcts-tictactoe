@@ -7,6 +7,7 @@ var chart;
 var xScores = [];
 var oScores = [];
 var mctsInitialized = false;
+var moveOk = true;
 
 
 /**
@@ -94,9 +95,11 @@ function linkMoves(grid) {
     let [i, j, ii, jj] = move;
     let box = document.getElementById(i + ' ' + j + ' ' + ii + ' ' + jj);
     box.addEventListener('click', () => {
+      if(!moveOk) return;
+      moveOk = false;
+      document.getElementById('loading').style.visibility = 'visible';
       drawScores();
       board.move(i, j, ii, jj);
-      document.getElementById('loading').style.visibility = 'visible';
       var grid = new Grid();
       drawPositions(grid);
       gridDiv.innerHTML = grid.render();
@@ -109,7 +112,7 @@ function linkMoves(grid) {
           window
             .requestAnimationFrame(  // Allow at least one frame to elapse
               // between the animation call
-              () => { computerMove(grid) }, 16));
+              () => { computerMove(grid) }, 50));
     });
   });
 }
@@ -128,12 +131,18 @@ function computerMove(grid) {
   [cI, cJ, cII, cJJ] =
     [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
 
-  drawScores();
 
-  board.move(cI, cJ, cII, cJJ);
+  while(!board.move(cI, cJ, cII, cJJ)){
+    iMove = getMove(board.board, board.player, oI, oJ);
+    [cI, cJ, cII, cJJ] =
+      [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
+  }
+
+  drawScores();
 
   draw();
   document.getElementById('loading').style.visibility = 'hidden';
+  moveOk = true;
 }
 /**
  * Draw and link the grid.
@@ -177,6 +186,16 @@ function drawScores() {
   } else if (board.player == PLAYER_O) {
     oScores.push(iScore);
     xScores.push(null);
+  }
+  if(board.gameWinner() != 0){
+    if(board.gameWinner() == -1){
+      xScores.push(1);
+    }else if(board.gameWinner() == 1){
+      oScores.push(0);
+    }else{
+      xScores.push(0.5);
+      oScores.push(0.5);
+    }
   }
 
   chart = new Chartist.Line('.score-chart', {

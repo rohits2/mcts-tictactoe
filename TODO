@@ -1,0 +1,7 @@
+1. Add an MCTS mode for passively exploring the tree in the background.
+   The interface is straightforward: 
+    1. A WebWorker/Thread that runs MCTS, stopping at a certain transposition table size
+      (side note: this task would have to invoke prune_ancestors() on board state changes)
+    2. A callback that changes the board state and raises a semaphore to signal it has done so.
+
+   Probably should restore parallel_mcts() as a separate function too.

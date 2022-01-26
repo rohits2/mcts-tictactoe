@@ -1,8 +1,9 @@
+import aiofiles
 from sanic import Sanic
-from sanic.response import json, html, redirect
+from sanic.response import json, html, redirect, text
 from sanic.exceptions import NotFound, ServerError
 
-app = Sanic()
+app = Sanic(name='mcts-demo')
 app.static('/res/main.js', './res/main.js')
 app.static('/res/material.css', './res/material.css')
 app.static('/res/favicon.png', './res/favicon.png')
@@ -21,18 +22,30 @@ with open("res/500.htm") as f:
 with open("res/404.htm") as f:
     notfound_html = f.read()
 
+CO_HEADERS = {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+}
+
 @app.route('/', methods=['GET'])
 async def index(request):
-    return html(index_html)
+    return html(index_html, headers=CO_HEADERS)
+
+@app.route('/mcts/mcts.worker.js', methods=['GET'])
+async def get_worker_js(request):
+    async with aiofiles.open("./mcts/mcts.worker.js") as f:
+        txt = await f.read()
+    return text(txt, headers=CO_HEADERS, content_type='text/javascript')
+
 
 @app.exception(NotFound)
 async def not_found(request, exception):
     print(exception)
-    return html(notfound_html, status=exception.status_code)
+    return html(notfound_html, status=exception.status_code, headers=CO_HEADERS)
         
 @app.exception(ServerError)
 async def ise(request, exception):
-    return html(ise_html, status=exception.status_code)
+    return html(ise_html, status=exception.status_code, headers=CO_HEADERS)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)

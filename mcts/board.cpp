@@ -89,7 +89,7 @@ bool is_unset(supergrid_coord tile) { return (tile.i == -1) && (tile.j == -1); }
 /*
  * Create an empty board.
  */
-Board::Board() {}
+Board::Board() { update_supergrid(); }
 
 /*
  * Copy a board.
@@ -122,17 +122,22 @@ Board::Board(const char grid[9][9], const int active_player, const supergrid_coo
 /*
  * Check if the game has a winner.
  */
-char Board::game_winner() const { return grid_winner(supergrid); }
+char Board::game_winner() const {
+  if (winner == PLAYER_UNSPECIFIED) {
+    printf("This should not be possible! Board has uncomputed winner.\n");
+  }
+  return winner;
+}
 
 /*
  * Get the move set of the current player, given a board state.
  * The move set is a vector of grid_coord.
  */
-vector<grid_coord> Board::get_valid_moves() const {
+std::vector<grid_coord> Board::get_valid_moves() const {
   if (game_winner() == PLAYER_TIE) {
-    return vector<grid_coord>();
+    return std::vector<grid_coord>();
   }
-  vector<grid_coord> moves;
+  std::vector<grid_coord> moves;
   if (is_unset(major_tile)) {
     for (int i = 0; i < 9; i++) {
       for (int j = 0; j < 9; j++) {
@@ -199,7 +204,10 @@ bool Board::move(const grid_coord &move) {
 /*
  * Recompute the winners of subgrid (m_i, m_j).
  */
-void Board::update_supergrid(int m_i, int m_j) { supergrid[m_i][m_j] = grid_winner(board, m_i, m_j); }
+void Board::update_supergrid(int m_i, int m_j) {
+  supergrid[m_i][m_j] = grid_winner(board, m_i, m_j);
+  winner = grid_winner(supergrid);
+}
 
 /*
  * Recompute the winners of every single subgrid.
@@ -210,64 +218,65 @@ void Board::update_supergrid() {
       supergrid[m_i][m_j] = grid_winner(board, m_i, m_j);
     }
   }
+  winner = grid_winner(supergrid);
 }
 
 /*
  * Pretty-print the board to stdout.
  */
 void Board::print() {
-  cout << endl;
+  std::cout << std::endl;
   for (int i = 0; i < 9; i++) {
     if (i % 3 == 0 && i > 0) {
-      cout << "-----------" << endl;
+      std::cout << "-----------" << std::endl;
     }
     for (int j = 0; j < 9; j++) {
       if (j % 3 == 0 && j > 0) {
-        cout << "|";
+        std::cout << "|";
       }
       switch (board[i][j]) {
       case PLAYER_X:
-        cout << "X";
+        std::cout << "X";
         break;
       case PLAYER_O:
-        cout << "O";
+        std::cout << "O";
         break;
       case PLAYER_NONE:
-        cout << " ";
+        std::cout << " ";
         break;
       default:
-        cout << "ERROR: INVALID VALUE IN BOARD!" << endl;
+        std::cout << "ERROR: INVALID VALUE IN BOARD!" << std::endl;
         break;
       }
     }
-    cout << endl;
+    std::cout << std::endl;
   }
   for (int i = 0; i < 3; i++) {
     if (i > 0) {
-      cout << "-----" << endl;
+      std::cout << "-----" << std::endl;
     }
     for (int j = 0; j < 3; j++) {
       if (j > 0) {
-        cout << "|";
+        std::cout << "|";
       }
       switch (supergrid[i][j]) {
       case PLAYER_X:
-        cout << "X";
+        std::cout << "X";
         break;
       case PLAYER_O:
-        cout << "O";
+        std::cout << "O";
         break;
       case PLAYER_NONE:
-        cout << " ";
+        std::cout << " ";
         break;
       default:
-        cout << "ERROR: INVALID VALUE IN BOARD!" << endl;
+        std::cout << "ERROR: INVALID VALUE IN BOARD!" << std::endl;
         break;
       }
     }
-    cout << endl;
+    std::cout << std::endl;
   }
-  cout << endl;
+  std::cout << std::endl;
 }
 
 /*

@@ -5,7 +5,6 @@
 #include <tuple>
 #include <vector>
 
-using std::vector, std::tuple, std::get, std::cout, std::endl, std::hash, std::cout, std::endl;
 typedef struct _grid_coord {
     int m_i;
     int m_j;
@@ -22,13 +21,14 @@ const char PLAYER_NONE = 0;
 const char PLAYER_X = -1;
 const char PLAYER_O = 1;
 const char PLAYER_TIE = 100;
+const char PLAYER_UNSPECIFIED = 92;
 
 class Board {
   public:
     Board(const Board &other);
     Board(const char grid[9][9], const int active_player, const supergrid_coord active_tile);
     Board();
-    vector<grid_coord> get_valid_moves() const;
+    std::vector<grid_coord> get_valid_moves() const;
     char game_winner() const;
     bool is_valid_move(const grid_coord &move) const;
     bool move(const grid_coord &move);
@@ -36,6 +36,7 @@ class Board {
     bool operator==(const Board &other) const;
     char board[9][9] = {PLAYER_NONE};
     char supergrid[3][3] = {PLAYER_NONE};
+    char winner = PLAYER_UNSPECIFIED;
     char player = PLAYER_X;
     supergrid_coord major_tile = {.i = -1, .j = -1};
 

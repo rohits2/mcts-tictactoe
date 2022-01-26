@@ -135,7 +135,7 @@ class Board {
   }
   move(i, j, ii, jj) {
     if (!this.isValidMove(i, j, ii, jj)) {
-      return;
+      return false;
     }
     let row = i * 3 + ii;
     let col = j * 3 + jj;
@@ -148,6 +148,7 @@ class Board {
     } else {
       this.majorTile = [ii, jj];
     }
+    return true;
   }
   gameWinner() {
     return supergridWinner(this.supergrid);
