@@ -22,10 +22,30 @@ void MCTSBackgroundWorker::do_work() {
       tree.prune_alpha_beta(current);
     }
 
+    std::shared_ptr<MCTSNode> node = tree.get_node(current, nullptr);
+
+    // Idle on a solved position. Once the search has conclusively proven the
+    // game is won -- every line leads to one player winning -- there is nothing
+    // left to learn, so stop burning rollouts and sleep until the board changes.
+    // The cheap Q gate keeps the full proof off the hot path: a forced win only
+    // shows up once the mover's win rate is near-certain, so we run the proof
+    // solely when the root already looks decisive.
+    float q = node->Q();
+    if (q > 0.9f || q < 0.1f) {
+      char winner = tree.proven_winner(node);
+      if (winner == PLAYER_X || winner == PLAYER_O) {
+        std::unique_lock<std::mutex> lk(board_lock);
+        while (!board_dirty) {
+          board_cv.wait_for(lk, std::chrono::milliseconds(200));
+        }
+        continue; // a new move arrived; re-evaluate from the top of the loop
+      }
+    }
+
     // Always make progress on the current root. This is what guarantees a
     // thread blocked in get_move() eventually sees enough visits to return.
-    std::shared_ptr<MCTSNode> node = tree.get_node(current, nullptr);
-    tree.mcts(node, iters_per_step);
+    // parallel_mcts fans the batch across PROC_COUNT search threads.
+    tree.parallel_mcts(node, iters_per_step);
 
     progress_cv.notify_all();
   }
@@ -35,6 +55,7 @@ void MCTSBackgroundWorker::set_board(const Board &new_board) {
   std::lock_guard<std::mutex> guard(board_lock);
   board = new_board;
   board_dirty = true;
+  board_cv.notify_all(); // wake the worker if it is idling on a solved position
 }
 
 grid_coord MCTSBackgroundWorker::get_move(const Board &board) {

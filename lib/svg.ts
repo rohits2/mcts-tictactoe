@@ -17,7 +17,14 @@ class SVG {
   }
   render(): string {
     let strings = [
-      `<svg viewBox="0 0 ${this.width} ${this.height}" style="width: 100%; max-width: 100%; max-height: 100%; display: block;">`
+      `<svg viewBox="0 0 ${this.width} ${this.height}" style="width: 100%; max-width: 100%; max-height: 100%; display: block;">`,
+      // Radial gradient used by the cell-link hover state: transparent in the
+      // centre, green toward the edges, so a hovered cell shows a faint inward
+      // glow (see rect.cell-link:hover in material.css).
+      `<defs><radialGradient id="cell-hover-glow" cx="50%" cy="50%" r="55%">` +
+      `<stop offset="38%" stop-color="#33ff99" stop-opacity="0"/>` +
+      `<stop offset="100%" stop-color="#33ff99" stop-opacity="0.6"/>` +
+      `</radialGradient></defs>`
     ];
     this.elements.forEach(element => {
       strings.push(element.render());
@@ -34,9 +41,10 @@ class Line extends Renderable {
   y2: Number;
   color: string;
   width: number;
+  className: string;
   constructor(
       x1: Number, y1: Number, x2: Number, y2: Number, color: string,
-      width: number) {
+      width: number, className: string = '') {
     super();
     this.x1 = x1;
     this.x2 = x2;
@@ -44,10 +52,11 @@ class Line extends Renderable {
     this.y2 = y2;
     this.color = color;
     this.width = width;
+    this.className = className;
   }
   render(): string {
     return `<line x1="${this.x1}" y1="${this.y1}" x2="${this.x2}" y2="${
-        this.y2}" style="stroke:${this.color}; stroke-width:${this.width}" />`
+        this.y2}" class="${this.className}" style="stroke:${this.color}; stroke-width:${this.width}" />`
   }
 }
 
@@ -73,7 +82,7 @@ class ClickableCaller extends Renderable {
   }
 
   render(): string {
-    return ` <rect x="${this.x}" y="${this.y}" width="${this.width}" height="${
+    return ` <rect class="cell-link" x="${this.x}" y="${this.y}" width="${this.width}" height="${
         this.height}" opacity="${this.opacity}" fill="${this.color}" id="${
         this.id}"/>`
   }
@@ -85,18 +94,21 @@ class Circle extends Renderable {
   r: Number;
   color: string;
   width: number;
+  className: string;
   constructor(
-      x: Number, y: Number, radius: Number, color: string, width: number) {
+      x: Number, y: Number, radius: Number, color: string, width: number,
+      className: string = '') {
     super();
     this.x = x;
     this.y = y;
     this.r = radius;
     this.color = color;
     this.width = width;
+    this.className = className;
   }
   render(): string {
-    return `<circle cx="${this.x}" cy="${this.y}" r="${this.r}" style="stroke:${
-        this.color}; stroke-width:${this.width}; fill: none" />`
+    return `<circle cx="${this.x}" cy="${this.y}" r="${this.r}" class="${
+        this.className}" style="stroke:${this.color}; stroke-width:${this.width}; fill: none" />`
   }
 }
 

@@ -1,5 +1,23 @@
 #include "board.h"
+#include <atomic>
+#include <cstdint>
 #include <cstdlib>
+
+// Per-thread RNG for rollouts. rand() shares hidden global state, so calling it
+// from the parallel search threads is both a data race and a source of
+// correlated (poor) randomness. A thread_local xorshift is lock-free, needs no
+// allocation, and gives each rollout thread an independent stream.
+static uint32_t mcts_rng_seed() {
+  static std::atomic<uint32_t> counter{0x9e3779b9u};
+  return counter.fetch_add(0x6d2b79f5u, std::memory_order_relaxed) | 1u;
+}
+static inline uint32_t mcts_rand() {
+  thread_local uint32_t state = mcts_rng_seed();
+  state ^= state << 13;
+  state ^= state >> 17;
+  state ^= state << 5;
+  return state;
+}
 
 /*
  * The eight winning lines of a 3x3 grid, expressed over the 9-bit local layout
@@ -237,7 +255,7 @@ bool Board::random_move(grid_coord &out) const {
   if (n == 0) {
     return false;
   }
-  out = buf[rand() % n];
+  out = buf[mcts_rand() % n];
   return true;
 }
 

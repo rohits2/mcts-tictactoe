@@ -31,6 +31,9 @@ var prevRollouts = 0;
 var prevStatsTime = 0;
 var engineGen = 0; // bumped to cancel any in-flight engine-move poll loop
 var showHelp = false; // overlay per-move win probabilities ("Show Help")
+// [i, j, ii, jj] of the move just played; the symbol there zooms in on the next
+// render and is then cleared, so only the freshly placed piece animates.
+var popCell = null;
 
 
 /**
@@ -75,12 +78,14 @@ function drawPositions(grid) {
     for (let j = 0; j < 3; j++) {
       for (let ii = 0; ii < 3; ii++) {
         for (let jj = 0; jj < 3; jj++) {
+          let animate = popCell != null && popCell[0] == i && popCell[1] == j &&
+              popCell[2] == ii && popCell[3] == jj;
           switch (board.getCell(i, j, ii, jj)) {
             case PLAYER_X:
-              grid.drawSmallX(i, j, ii, jj);
+              grid.drawSmallX(i, j, ii, jj, animate);
               break;
             case PLAYER_O:
-              grid.drawSmallO(i, j, ii, jj);
+              grid.drawSmallO(i, j, ii, jj, animate);
           }
         }
       }
@@ -98,6 +103,9 @@ function drawPositions(grid) {
       }
     }
   }
+  // Consume the pop: a redraw that isn't a fresh move (stats refresh, hints
+  // toggle, ...) must not replay the animation.
+  popCell = null;
 }
 /**
  * Given the SVG object, draw the clickable objects that will receive user
@@ -125,6 +133,7 @@ function linkMoves(grid) {
       document.getElementById('loading').style.visibility = 'visible';
       drawScores();
       board.move(i, j, ii, jj);
+      popCell = [i, j, ii, jj]; // zoom in the piece the user just placed
       var grid = new Grid();
       drawPositions(grid);
       gridDiv.innerHTML = grid.render();
@@ -349,12 +358,15 @@ function commitEngineMove(myGen) {
   try { iMove = peekMove(board.board, board.player, oI, oJ); } catch (e) { iMove = -1; }
   let cI = iMove >> 24 & 0xFF, cJ = iMove >> 16 & 0xFF, cII = iMove >> 8 & 0xFF, cJJ = iMove & 0xFF;
   let played = board.move(cI, cJ, cII, cJJ);
-  if (!played) {
+  if (played) {
+    popCell = [cI, cJ, cII, cJJ]; // zoom in the engine's piece
+  } else {
     // Unsearched / unplayable best move: play a known-valid move so the game continues.
     let validMoves = board.getValidMoves();
     if (validMoves.length) {
       let mv = validMoves[0];
       board.move(mv[0], mv[1], mv[2], mv[3]);
+      popCell = [mv[0], mv[1], mv[2], mv[3]];
     }
   }
   drawScores();

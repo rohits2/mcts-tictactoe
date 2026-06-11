@@ -248,3 +248,40 @@ details[open] summary:before {
     color: #AAAAAA;
 }
 
+/* A freshly placed symbol (class added in grid.ts) zooms in. transform-box:
+   fill-box pivots the scale on each SVG element's own bounding-box centre, so an
+   X (two diagonals) and an O (a circle) both grow out of the cell centre. */
+@keyframes sym-pop {
+    0% {
+        transform: scale(0);
+        opacity: 0.2;
+    }
+    60% {
+        transform: scale(1.12);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.sym-pop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: sym-pop 220ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+/* Clickable valid-move cells: show a faint inward green glow on hover (the
+   radial gradient is defined in the SVG defs in svg.ts) to signal they're
+   clickable. */
+rect.cell-link {
+    transition: opacity 120ms ease;
+    cursor: pointer;
+}
+
+rect.cell-link:hover {
+    fill: url(#cell-hover-glow);
+    opacity: 1;
+}
+

@@ -47,6 +47,9 @@ protected:
 
   std::mutex board_lock;
   bool board_dirty = false;
+  // Signalled by set_board so the worker can sleep (instead of spinning) while it
+  // is idling on a solved position, and wake the instant a new move arrives.
+  std::condition_variable board_cv;
 
   // Signalled by the worker after every batch of rollouts so a thread blocked
   // in get_move() can re-check whether enough search has accumulated.

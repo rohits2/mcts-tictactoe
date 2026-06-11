@@ -7,7 +7,92 @@ const float C = 1.44;
 const float TIE_REWARD = 0.5;
 const float inf = std::numeric_limits<float>::infinity();
 
-MCTSTree::MCTSTree() {
+ThreadPool::ThreadPool(unsigned num_threads) {
+  for (unsigned i = 0; i < num_threads; i++) {
+    threads_.emplace_back([this] { worker_loop(); });
+  }
+}
+
+ThreadPool::~ThreadPool() {
+  {
+    std::lock_guard<std::mutex> lk(mtx_);
+    stop_ = true;
+  }
+  cv_.notify_all();
+  for (std::thread &t : threads_) {
+    t.join();
+  }
+}
+
+void ThreadPool::worker_loop() {
+  for (;;) {
+    std::function<void()> task;
+    {
+      std::unique_lock<std::mutex> lk(mtx_);
+      cv_.wait(lk, [this] { return stop_ || !tasks_.empty(); });
+      if (stop_ && tasks_.empty()) {
+        return;
+      }
+      task = std::move(tasks_.front());
+      tasks_.pop();
+    }
+    task();
+  }
+}
+
+// Fan `count` task indices across the pool and the calling thread, blocking
+// until all have run. NOT reentrant: a task must not itself call parallel_for
+// (the search never does -- only the single worker thread submits batches).
+void ThreadPool::parallel_for(int count, const std::function<void(int)> &fn) {
+  if (count <= 0) {
+    return;
+  }
+  if (threads_.empty()) { // degenerate single-threaded build: just run inline
+    for (int i = 0; i < count; i++) {
+      fn(i);
+    }
+    return;
+  }
+  // remaining/done_* live on this stack frame; parallel_for blocks until every
+  // task has finished, so the task closures may safely capture them by reference.
+  std::atomic<int> remaining{count};
+  std::mutex done_mtx;
+  std::condition_variable done_cv;
+  {
+    std::lock_guard<std::mutex> lk(mtx_);
+    for (int i = 0; i < count; i++) {
+      tasks_.push([&fn, i, &remaining, &done_mtx, &done_cv] {
+        fn(i);
+        // Notify under the mutex so the waiter can't destroy done_cv mid-notify.
+        if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+          std::lock_guard<std::mutex> dlk(done_mtx);
+          done_cv.notify_one();
+        }
+      });
+    }
+  }
+  cv_.notify_all();
+  // The submitting thread pitches in instead of blocking idle.
+  for (;;) {
+    std::function<void()> task;
+    {
+      std::lock_guard<std::mutex> lk(mtx_);
+      if (tasks_.empty()) {
+        break;
+      }
+      task = std::move(tasks_.front());
+      tasks_.pop();
+    }
+    task();
+  }
+  std::unique_lock<std::mutex> lk(done_mtx);
+  done_cv.wait(lk, [&] { return remaining.load(std::memory_order_acquire) == 0; });
+}
+
+// The pool keeps PROC_COUNT-1 threads; the thread that calls parallel_for joins
+// in as the PROC_COUNT-th worker, so a batch runs PROC_COUNT-wide without an
+// idle submitter. A single-core build gets an empty pool and runs inline.
+MCTSTree::MCTSTree() : pool_(PROC_COUNT > 1 ? PROC_COUNT - 1 : 0) {
   // Pre-size the bucket array so a table that grows toward the search's node count
   // does not pay the ~16 incremental rehashes it otherwise would. A modest hint
   // keeps small searches cheap while still covering the common case.
@@ -30,17 +115,20 @@ std::shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, std::shared
       continue;
     }
     if (node->board == new_board) {
-      // Order matters: the UI thread calls get_node(board, nullptr), so testing
-      // new_parent first short-circuits and never touches node->parents -- which
-      // the worker thread mutates under the node lock. parents is thus only ever
-      // accessed from the single search thread.
-      if (new_parent != nullptr && node->parents.size() == 0) {
-        auto itr = std::find(roots.begin(), roots.end(), node);
-        if (itr != roots.end()) {
-          roots.erase(itr);
-        }
-      }
+      // The UI thread only ever calls get_node(board, nullptr), so the nullptr
+      // short-circuit lets it return without touching node->parents/node->lock
+      // at all. A real parent link (only the search threads pass one) is made
+      // under the node lock -- held here while we already hold tree_lock, i.e.
+      // in the global tree_lock -> node_lock order -- so concurrent search
+      // threads adding parents (here) and reading them (in U()) never race.
       if (new_parent != nullptr) {
+        std::lock_guard<std::recursive_mutex> nguard(node->lock);
+        if (node->parents.size() == 0) {
+          auto itr = std::find(roots.begin(), roots.end(), node);
+          if (itr != roots.end()) {
+            roots.erase(itr);
+          }
+        }
         node->parents.push_back(new_parent);
       }
       total_hits++; // under tree_lock, like total_lookups
@@ -82,21 +170,48 @@ std::shared_ptr<MCTSNode> MCTSTree::find_node(const Board &new_board) {
 // relaxes every cutoff so that moves within `margin` win-probability of optimal
 // are retained instead of collapsing onto a single principal variation.
 void MCTSTree::prune_alpha_beta(std::shared_ptr<MCTSNode> node, float margin) {
-  tree_lock.lock();
-  // Pass 1: exact negamax values for the whole reachable subtree, memoised so a
-  // node shared via transposition is scored once (the tree is a DAG).
-  std::unordered_map<const MCTSNode *, float> values;
-  node->minimax_value(values);
-  // Pass 2: alpha-beta sweep that prunes using those values. The full [0, 1]
-  // window at the root still yields plenty of cutoffs deeper in the tree.
-  std::unordered_set<const MCTSNode *> done;
-  node->alpha_beta_prune(0.0f, 1.0f, margin, values, done);
-  tree_lock.unlock();
+  // Snapshot the root's children, then prune each child's subtree in parallel.
+  // The root and its direct children are always kept (with margin > 0 the root
+  // level never cuts), so there is no cross-child alpha-beta dependency to
+  // serialise: each subtree is pruned independently with the full [0, 1] window
+  // and its own memo/done. Using the full window per child is at worst slightly
+  // less aggressive than the sequential sweep (a wider window prunes less, never
+  // wrongly). We deliberately do NOT hold tree_lock across this: the worker
+  // threads' filicides drop nodes whose destructors take tree_lock themselves,
+  // so holding it here would deadlock against the threads we join below.
+  node->lock.lock();
+  bool leaf = !node->expanded || node->children.empty();
+  std::vector<std::shared_ptr<MCTSNode>> kids;
+  if (!leaf) {
+    kids.assign(node->children.begin(), node->children.end());
+  }
+  node->lock.unlock();
+  if (kids.empty()) {
+    return;
+  }
+
+  // One task per root child, dynamically scheduled by the pool so the (typically
+  // huge) principal-variation subtree doesn't stall the others. Pass 1: exact
+  // negamax values for the subtree, memoised so a node shared via transposition
+  // is scored once. Pass 2: the alpha-beta sweep that prunes using them.
+  // memo/done are per-subtree, so a node shared across two root children is
+  // pruned by whichever task reaches it first.
+  pool_.parallel_for((int)kids.size(), [&kids, margin](int i) {
+    std::unordered_map<const MCTSNode *, float> memo;
+    std::unordered_set<const MCTSNode *> done;
+    kids[i]->minimax_value(memo);
+    kids[i]->alpha_beta_prune(0.0f, 1.0f, margin, memo, done);
+  });
 }
 
 void MCTSTree::prune_alpha_beta(const Board &board, float margin) {
   std::shared_ptr<MCTSNode> node = get_node(board, nullptr);
   prune_alpha_beta(node, margin);
+}
+
+char MCTSTree::proven_winner(std::shared_ptr<MCTSNode> node) {
+  std::unordered_map<const MCTSNode *, char> memo;
+  return node->proven_winner(memo);
 }
 
 void MCTSTree::prune_feather(std::shared_ptr<MCTSNode> node) { node->prune_ancestors(); }
@@ -122,7 +237,12 @@ float MCTSTree::transposition_hitrate() {
   return total_hits / ((float)total_lookups);
 }
 
-int MCTSTree::transposition_size() { return transposition_table.size(); }
+int MCTSTree::transposition_size() {
+  // size() concurrent with a search thread's insert/erase is a data race on the
+  // container; read it under tree_lock like every other table access.
+  std::lock_guard<std::recursive_mutex> guard(tree_lock);
+  return transposition_table.size();
+}
 long long MCTSTree::purges() { return total_fillicides; }
 
 MCTSNode::MCTSNode(const Board &new_board, std::shared_ptr<MCTSNode> new_parent, MCTSTree *host) {
@@ -151,7 +271,11 @@ float MCTSNode::parent_Q() {
 
 float MCTSNode::U() {
   unsigned parent_visit_count = 0;
-  for (int i = 0; i < parents.size(); i++) {
+  // parents is shared mutable state under parallel search (search threads add
+  // links via get_node and reap expired ones here), so iterate it under the
+  // node lock. The parents' visit counts are atomics, read without their locks.
+  lock.lock();
+  for (int i = 0; i < (int)parents.size(); i++) {
     auto parent = parents[i];
     if (parent.expired()) {
       parents.erase(parents.begin() + i);
@@ -160,6 +284,7 @@ float MCTSNode::U() {
     }
     parent_visit_count += parent.lock()->visits;
   }
+  lock.unlock();
   return C * sqrt((float)parent_visit_count) / (1.0 + visits);
 }
 
@@ -231,15 +356,19 @@ std::vector<std::shared_ptr<MCTSNode>> MCTSNode::select() {
   path.reserve(64);
   std::shared_ptr<MCTSNode> cur_node = shared_from_this();
   while (cur_node->expanded) {
-    path.push_back(cur_node);
     std::shared_ptr<MCTSNode> new_node = cur_node->max_PUCT();
-    cur_node->lock.lock();
-    cur_node->visits++;
-    cur_node->lock.unlock();
+    // Defensive: an expanded node should always have a child, but if a
+    // concurrent collapse ever left it childless, stop here rather than
+    // dereference a null reply on the next loop.
+    if (new_node == nullptr) {
+      break;
+    }
+    path.push_back(cur_node);
+    cur_node->visits++; // atomic
     cur_node = new_node;
   };
   path.push_back(cur_node);
-  cur_node->visits++;
+  cur_node->visits++; // atomic
   return path;
 }
 
@@ -287,6 +416,61 @@ float MCTSNode::minimax_value(std::unordered_map<const MCTSNode *, float> &memo)
   return value;
 }
 
+// Conclusively-proven winner of this subtree, from a pure game-theoretic view:
+// PLAYER_X / PLAYER_O if that player can force a win against any defence,
+// PLAYER_TIE if best play is a forced draw, or PLAYER_NONE if the outcome is not
+// yet proven (an unexpanded frontier node counts as unknown -- its rollout
+// estimate is a guess, not a proof). The mover here picks the best reply, so it
+// is a proven win for the mover as soon as ONE child is a proven win for it
+// (short-circuit); a proven loss only once EVERY child is proven and none
+// favours the mover. Memoised over the transposition DAG.
+char MCTSNode::proven_winner(std::unordered_map<const MCTSNode *, char> &memo) {
+  auto cached = memo.find(this);
+  if (cached != memo.end()) {
+    return cached->second;
+  }
+  char winner = board.game_winner();
+  if (winner != PLAYER_NONE) { // terminal: the result is exact
+    memo[this] = winner;
+    return winner;
+  }
+  lock.lock();
+  bool leaf = !expanded || children.empty();
+  std::vector<std::shared_ptr<MCTSNode>> kids;
+  if (!leaf) {
+    kids.assign(children.begin(), children.end());
+  }
+  lock.unlock();
+  if (leaf) { // unexpanded frontier: outcome unknown, not proven
+    memo[this] = PLAYER_NONE;
+    return PLAYER_NONE;
+  }
+
+  char mover = board.player;
+  char opponent = (mover == PLAYER_X) ? PLAYER_O : PLAYER_X;
+  bool any_unknown = false;
+  bool any_tie = false;
+  for (std::shared_ptr<MCTSNode> &child : kids) {
+    char r = child->proven_winner(memo);
+    if (r == mover) { // a move that forces the mover's win -- done
+      memo[this] = mover;
+      return mover;
+    }
+    if (r == PLAYER_NONE) {
+      any_unknown = true;
+    } else if (r == PLAYER_TIE) {
+      any_tie = true;
+    }
+    // r == opponent: a losing line the mover simply won't choose.
+  }
+  // No forced win for the mover. If any reply is still unproven the result is
+  // open; otherwise the mover steers to the best proven outcome it can (a draw
+  // if available, else the forced loss).
+  char result = any_unknown ? PLAYER_NONE : (any_tie ? PLAYER_TIE : opponent);
+  memo[this] = result;
+  return result;
+}
+
 // Alpha-beta sweep that prunes the children a minimax searcher would never need
 // to examine. `memo` holds the exact values from minimax_value(); `done` makes
 // each node in the DAG prune at most once. Children are visited best-first so
@@ -300,16 +484,22 @@ void MCTSNode::alpha_beta_prune(float alpha, float beta, float margin,
   if (!done.insert(this).second) {
     return;
   }
+  // Snapshot the children best-first under the lock, then release it: the
+  // recursion and the filicides below take other nodes' locks, and holding this
+  // node's lock across them would serialise whole branches and nest locks. We
+  // copy (never reorder the real children/moves vectors, whose shared index
+  // correspondence get_move/get_policy rely on). Best reply == smallest child
+  // value (== largest 1 - value for this player).
   lock.lock();
-  if (!expanded || children.empty()) {
-    lock.unlock();
+  bool leaf = !expanded || children.empty();
+  std::vector<std::shared_ptr<MCTSNode>> ordered;
+  if (!leaf) {
+    ordered.assign(children.begin(), children.end());
+  }
+  lock.unlock();
+  if (leaf) {
     return;
   }
-  // Order a copy of the children best-first for the player to move; never touch
-  // the real children/moves vectors, whose shared index correspondence get_move
-  // and get_policy rely on. Best reply == smallest child value (== largest
-  // 1 - value for this player).
-  std::vector<std::shared_ptr<MCTSNode>> ordered(children.begin(), children.end());
   std::sort(ordered.begin(), ordered.end(),
             [&memo](const std::shared_ptr<MCTSNode> &a, const std::shared_ptr<MCTSNode> &b) {
               return memo.at(a.get()) < memo.at(b.get());
@@ -333,7 +523,6 @@ void MCTSNode::alpha_beta_prune(float alpha, float beta, float margin,
   for (size_t i = cut_from; i < ordered.size(); i++) {
     ordered[i]->filicide();
   }
-  lock.unlock();
 }
 
 void MCTSNode::filicide() {
@@ -357,34 +546,54 @@ void MCTSNode::prune_ancestors(std::shared_ptr<const MCTSNode> node_to_keep) {
       child->filicide();
     }
   }
-  lock.unlock();
-  for (int i = 0; i < parents.size(); i++) {
-    auto wk_parent = parents[i];
-    if (wk_parent.expired()) {
+  // Snapshot the live parents (reaping expired links) under the lock, then
+  // recurse without holding it: parents is shared with the search threads, and
+  // recursing while holding the lock would also nest descendant->ancestor node
+  // locks against the ancestor->descendant order the rest of the tree uses.
+  std::vector<std::shared_ptr<MCTSNode>> live_parents;
+  for (int i = 0; i < (int)parents.size(); i++) {
+    if (parents[i].expired()) {
       parents.erase(parents.begin() + i);
       i--;
       continue;
     }
-    std::shared_ptr<MCTSNode> parent = wk_parent.lock();
+    live_parents.push_back(parents[i].lock());
+  }
+  lock.unlock();
+  for (std::shared_ptr<MCTSNode> &parent : live_parents) {
     parent->prune_ancestors(shared_from_this());
   }
 }
 
 void MCTSNode::expand() {
+  visits++; // atomic
+  // Claim expansion under the lock so exactly one thread builds the children.
   lock.lock();
-  visits++;
-  if (expanded) {
+  if (expanded || expanding) {
     lock.unlock();
     return;
   }
+  expanding = true;
+  lock.unlock();
+
+  // Build the children WITHOUT holding the node lock: get_node() takes tree_lock
+  // (and the child's node lock), and holding our own node lock across that would
+  // invert the global tree_lock -> node_lock order and risk deadlock.
   std::vector<grid_coord> moves = board.get_valid_moves();
+  std::vector<std::shared_ptr<MCTSNode>> new_children;
+  new_children.reserve(moves.size());
   for (grid_coord move : moves) {
-    expanded = true;
     Board new_board(board);
     new_board.move(move);
-    std::shared_ptr<MCTSNode> new_node = tree->get_node(new_board, shared_from_this());
-    children.push_back(new_node);
+    new_children.push_back(tree->get_node(new_board, shared_from_this()));
   }
+
+  // Publish atomically: install the children, then flip `expanded` so no other
+  // thread ever sees this node expanded with an empty child list.
+  lock.lock();
+  children = std::move(new_children);
+  expanded = !children.empty();
+  expanding = false;
   lock.unlock();
 }
 
@@ -450,20 +659,27 @@ void MCTSTree::mcts(const Board &board, int num_iterations) {
   mcts(node, num_iterations);
 }
 
+void MCTSTree::parallel_mcts(std::shared_ptr<MCTSNode> node, int num_iterations) {
+  if (num_iterations <= 0) {
+    return;
+  }
+  // Split the rollouts into one block per effective worker (pool threads + the
+  // calling thread) and run them on the persistent pool -- no per-batch thread
+  // creation. The first `extra` blocks carry the remainder, so the blocks sum to
+  // exactly num_iterations.
+  int workers = (int)pool_.size() + 1;
+  int n_tasks = std::min(num_iterations, workers);
+  int base = num_iterations / n_tasks;
+  int extra = num_iterations % n_tasks;
+  pool_.parallel_for(n_tasks, [this, node, base, extra](int t) {
+    int block = base + (t < extra ? 1 : 0);
+    if (block > 0) {
+      this->mcts(node, block);
+    }
+  });
+}
+
 void MCTSTree::parallel_mcts(const Board &board, int num_iterations) {
   std::shared_ptr<MCTSNode> node = get_node(board, nullptr);
-  int remaining = num_iterations;
-  int n_threads = PROC_COUNT;
-  n_threads = n_threads < 1 ? 1 : n_threads;
-  int block_sz = num_iterations / n_threads;
-  std::vector<std::thread *> workers;
-  while (remaining > 0) {
-    int block = std::min(block_sz, remaining);
-    workers.push_back(new std::thread([this, node, block] { this->mcts(node, block); }));
-    remaining -= block;
-  }
-  for (std::thread *worker : workers) {
-    worker->join();
-    delete worker;
-  }
+  parallel_mcts(node, num_iterations);
 }

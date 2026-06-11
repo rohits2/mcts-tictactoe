@@ -41,25 +41,27 @@ class Grid {
     this.svg.add(...drawCell(
         0, 0, SUPERGRID_WIDTH, EXTERIOR_BORDER_WIDTH, EXTERIOR_BORDER_COLOR))
   }
-  drawSmallX(i: number, j: number, ii: number, jj: number) {
+  drawSmallX(i: number, j: number, ii: number, jj: number, animate: boolean = false) {
     let x = j * SUPERGRID_WIDTH + jj * GRID_WIDTH + INTERIOR_OFFSET +
         MARKING_OFFSET;
     let y = i * SUPERGRID_WIDTH + ii * GRID_WIDTH + INTERIOR_OFFSET +
         MARKING_OFFSET;
+    let cls = animate ? 'sym-pop' : '';
     this.svg.add(new Line(
         x, y, x + GRID_WIDTH - 2 * MARKING_OFFSET,
-        y + GRID_WIDTH - 2 * MARKING_OFFSET, X_COLOR, SMALL_SYM_WIDTH));
+        y + GRID_WIDTH - 2 * MARKING_OFFSET, X_COLOR, SMALL_SYM_WIDTH, cls));
     this.svg.add(new Line(
         x + GRID_WIDTH - 2 * MARKING_OFFSET, y, x,
-        y + GRID_WIDTH - 2 * MARKING_OFFSET, X_COLOR, SMALL_SYM_WIDTH))
+        y + GRID_WIDTH - 2 * MARKING_OFFSET, X_COLOR, SMALL_SYM_WIDTH, cls))
   }
-  drawSmallO(i: number, j: number, ii: number, jj: number) {
+  drawSmallO(i: number, j: number, ii: number, jj: number, animate: boolean = false) {
     let x = j * SUPERGRID_WIDTH + jj * GRID_WIDTH + INTERIOR_OFFSET +
         GRID_WIDTH / 2;
     let y = i * SUPERGRID_WIDTH + ii * GRID_WIDTH + INTERIOR_OFFSET +
         GRID_WIDTH / 2;
     this.svg.add(new Circle(
-        x, y, GRID_WIDTH / 2 - MARKING_OFFSET, O_COLOR, SMALL_SYM_WIDTH));
+        x, y, GRID_WIDTH / 2 - MARKING_OFFSET, O_COLOR, SMALL_SYM_WIDTH,
+        animate ? 'sym-pop' : ''));
   }
   addSmallLink(i: number, j: number, ii: number, jj: number, callback) {
     let x = j * SUPERGRID_WIDTH + jj * GRID_WIDTH + INTERIOR_OFFSET;
