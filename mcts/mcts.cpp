@@ -7,60 +7,77 @@ const float C = 1.44;
 const float TIE_REWARD = 0.5;
 const float inf = std::numeric_limits<float>::infinity();
 
+MCTSTree::MCTSTree() {
+  // Pre-size the bucket array so a table that grows toward the search's node count
+  // does not pay the ~16 incremental rehashes it otherwise would. A modest hint
+  // keeps small searches cheap while still covering the common case.
+  transposition_table.reserve(1 << 16);
+}
+
 std::shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, std::shared_ptr<MCTSNode> new_parent) {
   tree_lock.lock();
   total_lookups++;
-  if (transposition_table.find(new_board) != transposition_table.end()) {
-    auto wk_node = transposition_table[new_board];
-    if (wk_node.expired()) {
-      transposition_table.erase(transposition_table.find(new_board));
-      printf("Found dead node in get_node!\n");
-      return get_node(new_board, new_parent);
+  // Single hash + single bucket probe. The bucket holds every node whose board
+  // hashes to `key`; we identify the real match with operator== (so a hash
+  // collision can never alias two different positions) and reap expired entries
+  // as we pass them.
+  uint64_t key = new_board.hash();
+  auto range = transposition_table.equal_range(key);
+  for (auto it = range.first; it != range.second;) {
+    std::shared_ptr<MCTSNode> node = it->second.wp.lock();
+    if (!node) {
+      it = transposition_table.erase(it);
+      continue;
     }
-    std::shared_ptr<MCTSNode> node = wk_node.lock();
-    if (node->parents.size() == 0 && new_parent != nullptr) {
-      printf("Unrooting!\n");
-      auto itr = find(roots.begin(), roots.end(), node);
-      roots.erase(itr);
+    if (node->board == new_board) {
+      if (node->parents.size() == 0 && new_parent != nullptr) {
+        auto itr = std::find(roots.begin(), roots.end(), node);
+        if (itr != roots.end()) {
+          roots.erase(itr);
+        }
+      }
+      if (new_parent != nullptr) {
+        node->parents.push_back(new_parent);
+      }
+      tree_lock.unlock();
+      total_hits++;
+      return node;
     }
-    if (new_parent != nullptr) {
-      node->parents.push_back(new_parent);
-    }
-    tree_lock.unlock();
-    total_hits++;
-    return node;
+    ++it; // same hash, different board: a genuine collision, keep probing
   }
   std::shared_ptr<MCTSNode> node = std::make_shared<MCTSNode>(new_board, new_parent, this);
-  auto entry = std::pair<Board, std::weak_ptr<MCTSNode>>(new_board, node);
-  transposition_table.insert(entry);
+  transposition_table.insert({key, NodeRef{node, node.get()}});
   if (new_parent == nullptr) {
-    printf("Rooting node!\n");
     roots.push_back(node);
   }
   tree_lock.unlock();
   return node;
 }
 
-void MCTSTree::prune_hard(unsigned max_size) {
+// Alpha-beta pruning over the already-built search tree. Rather than the old
+// visit-count / Q-threshold heuristics, this discards exactly the branches a
+// minimax searcher would never have to look at: it runs alpha-beta with
+// best-first move ordering over the live subtree and collapses (filicides) the
+// children cut off at each node, freeing their descendants while keeping the
+// move itself and its statistics for the UI and for get_move(). `margin`
+// relaxes every cutoff so that moves within `margin` win-probability of optimal
+// are retained instead of collapsing onto a single principal variation.
+void MCTSTree::prune_alpha_beta(std::shared_ptr<MCTSNode> node, float margin) {
   tree_lock.lock();
-  std::queue<std::shared_ptr<MCTSNode>> inspection_queue;
-  for (std::shared_ptr<MCTSNode> root : roots) {
-    inspection_queue.push(root);
-  }
-  while (transposition_table.size() > max_size) {
-    std::shared_ptr<MCTSNode> node = inspection_queue.front();
-    inspection_queue.pop();
-    unsigned max_visits = 0;
-    for (auto child : node->children) {
-      max_visits = max_visits > node->visits ? max_visits : node->visits;
-    }
-    for (auto child : node->children) {
-      if (child->visits < max_visits) {
-        child->filicide();
-      }
-    }
-  }
+  // Pass 1: exact negamax values for the whole reachable subtree, memoised so a
+  // node shared via transposition is scored once (the tree is a DAG).
+  std::unordered_map<const MCTSNode *, float> values;
+  node->minimax_value(values);
+  // Pass 2: alpha-beta sweep that prunes using those values. The full [0, 1]
+  // window at the root still yields plenty of cutoffs deeper in the tree.
+  std::unordered_set<const MCTSNode *> done;
+  node->alpha_beta_prune(0.0f, 1.0f, margin, values, done);
   tree_lock.unlock();
+}
+
+void MCTSTree::prune_alpha_beta(const Board &board, float margin) {
+  std::shared_ptr<MCTSNode> node = get_node(board, nullptr);
+  prune_alpha_beta(node, margin);
 }
 
 void MCTSTree::prune_feather(std::shared_ptr<MCTSNode> node) { node->prune_ancestors(); }
@@ -72,7 +89,7 @@ void MCTSTree::prune_feather(const Board &board) {
 
 void MCTSTree::prune_soft(std::shared_ptr<MCTSNode> node) {
   node->prune_ancestors();
-  node->prune_children(0.05, false);
+  prune_alpha_beta(node);
 }
 
 void MCTSTree::prune_soft(const Board &board) {
@@ -93,7 +110,9 @@ MCTSNode::MCTSNode(const Board &new_board, std::shared_ptr<MCTSNode> new_parent,
   board = new_board;
   tree = host;
   parents.push_back(new_parent);
-  moves = board.get_valid_moves();
+  // The legal-move list is recomputed on demand (in expand(), and in
+  // get_move()/get_policy()) rather than stored: a never-expanded frontier node
+  // then costs nothing for it.
 }
 
 float MCTSNode::Q() {
@@ -135,12 +154,13 @@ grid_coord MCTSNode::get_move() const {
     return best_move;
   }
   lock.lock();
-  printf("--- Move enumeration ---\n");
-  for (int i = 0; i < children.size(); i++) {
+  // children[i] was created from get_valid_moves()[i] in expand(), in that exact
+  // order, and the order is never permuted (alpha-beta pruning sorts a copy), so
+  // recompute the move list here rather than storing it on every node.
+  std::vector<grid_coord> moves = board.get_valid_moves();
+  for (int i = 0; i < (int)children.size() && i < (int)moves.size(); i++) {
     std::shared_ptr<MCTSNode> child = children[i];
     float Q = child->Q();
-    printf("N(%d, %d, %d, %d)/%d - valued by %d as %f \n ", moves[i].m_i, moves[i].m_j, moves[i].i, moves[i].j,
-           child->visits, child->board.player, Q);
     if (Q < best_Q) {
       best_Q = Q;
       best_visits = child->visits;
@@ -151,7 +171,6 @@ grid_coord MCTSNode::get_move() const {
       best_move = moves[i];
     }
   }
-  printf("----\n");
   lock.unlock();
   return best_move;
 }
@@ -162,10 +181,11 @@ policy_vec MCTSNode::get_policy() const {
     return vec;
   }
   lock.lock();
-  for (int ind = 0; ind < children.size(); ind++) {
+  std::vector<grid_coord> moves = board.get_valid_moves();
+  for (int ind = 0; ind < (int)children.size() && ind < (int)moves.size(); ind++) {
     std::shared_ptr<MCTSNode> child = children[ind];
     int i = moves[ind].m_i * 3 + moves[ind].i;
-    int j = moves[ind].m_i * 3 + moves[ind].i;
+    int j = moves[ind].m_j * 3 + moves[ind].j;
     vec.policy[i][j] = 1 - child->Q() + 0.00001;
   }
   lock.unlock();
@@ -206,18 +226,93 @@ std::vector<std::shared_ptr<MCTSNode>> MCTSNode::select() {
 
 void MCTSNode::prune_ancestors() { prune_ancestors(shared_from_this()); }
 
-void MCTSNode::prune_children(float reduction, bool recurse) {
-  lock.lock();
-  float threshold = 1-reduction;
-  float max_Q = -inf;
-  for (auto child : children) {
-    float Q = child->Q();
-    max_Q = std::max(max_Q, Q);
+// Negamax value of this subtree from the perspective of the player to move
+// here, in [0, 1] (1 == win for the mover, 0.5 == tie, 0 == loss). Terminal
+// positions score exactly; a non-terminal frontier node falls back to the MCTS
+// estimate Q(). Internal nodes pick the best reply: V = max over children of
+// (1 - V(child)), where the "1 -" flips into the opponent's perspective.
+// Memoised on the node pointer so each node in the transposition DAG is scored
+// once, keeping the pass O(nodes).
+float MCTSNode::minimax_value(std::unordered_map<const MCTSNode *, float> &memo) {
+  auto cached = memo.find(this);
+  if (cached != memo.end()) {
+    return cached->second;
   }
-  for (auto child : children) {
-    float Q = child->Q();
-    if(Q > max_Q*threshold) child->filicide();
-    if(recurse) prune_children(reduction, recurse);
+  lock.lock();
+  bool leaf = !expanded || children.empty();
+  std::vector<std::shared_ptr<MCTSNode>> kids;
+  if (!leaf) {
+    kids.assign(children.begin(), children.end());
+  }
+  lock.unlock();
+
+  float value;
+  if (leaf) {
+    char winner = board.game_winner();
+    if (winner == PLAYER_TIE) {
+      value = TIE_REWARD;
+    } else if (winner == PLAYER_NONE) {
+      value = Q(); // unexpanded frontier: trust the rollout estimate
+    } else {
+      // A finished game was won by whoever just moved, i.e. the opponent of the
+      // player to move here, so this node is a loss for the mover.
+      value = (winner == board.player) ? 1.0f : 0.0f;
+    }
+  } else {
+    value = -inf;
+    for (std::shared_ptr<MCTSNode> &child : kids) {
+      value = std::max(value, 1.0f - child->minimax_value(memo));
+    }
+  }
+  memo[this] = value;
+  return value;
+}
+
+// Alpha-beta sweep that prunes the children a minimax searcher would never need
+// to examine. `memo` holds the exact values from minimax_value(); `done` makes
+// each node in the DAG prune at most once. Children are visited best-first so
+// cutoffs land as early (and prune as much) as possible. `margin` widens the
+// cutoff test so near-optimal siblings (within `margin` of mattering) are kept
+// rather than collapsed. A filicided child is collapsed to a leaf -- its move
+// and statistics survive, only its descendants are freed.
+void MCTSNode::alpha_beta_prune(float alpha, float beta, float margin,
+                                std::unordered_map<const MCTSNode *, float> &memo,
+                                std::unordered_set<const MCTSNode *> &done) {
+  if (!done.insert(this).second) {
+    return;
+  }
+  lock.lock();
+  if (!expanded || children.empty()) {
+    lock.unlock();
+    return;
+  }
+  // Order a copy of the children best-first for the player to move; never touch
+  // the real children/moves vectors, whose shared index correspondence get_move
+  // and get_policy rely on. Best reply == smallest child value (== largest
+  // 1 - value for this player).
+  std::vector<std::shared_ptr<MCTSNode>> ordered(children.begin(), children.end());
+  std::sort(ordered.begin(), ordered.end(),
+            [&memo](const std::shared_ptr<MCTSNode> &a, const std::shared_ptr<MCTSNode> &b) {
+              return memo.at(a.get()) < memo.at(b.get());
+            });
+
+  float value = -inf;
+  size_t cut_from = ordered.size();
+  for (size_t i = 0; i < ordered.size(); i++) {
+    // Recurse into the reply we keep, pruning inside it under the negated
+    // window (the opponent's alpha/beta are 1 - our beta/alpha).
+    ordered[i]->alpha_beta_prune(1.0f - beta, 1.0f - alpha, margin, memo, done);
+    value = std::max(value, 1.0f - memo.at(ordered[i].get()));
+    alpha = std::max(alpha, value);
+    // Relaxed beta cutoff: only discard the rest once the line we keep is ahead
+    // by more than `margin`, so equally-good / near-optimal replies survive.
+    if (alpha >= beta + margin) {
+      cut_from = i + 1;
+      break;
+    }
+  }
+  for (size_t i = cut_from; i < ordered.size(); i++) {
+    ordered[i]->filicide();
   }
   lock.unlock();
 }
@@ -263,6 +358,7 @@ void MCTSNode::expand() {
     lock.unlock();
     return;
   }
+  std::vector<grid_coord> moves = board.get_valid_moves();
   for (grid_coord move : moves) {
     expanded = true;
     Board new_board(board);
@@ -288,18 +384,29 @@ void MCTSNode::backpropagate(const Board &board, const std::vector<std::shared_p
 
 Board simulate(const Board &board) {
   Board new_board(board);
+  grid_coord move;
   while (new_board.game_winner() == PLAYER_NONE) {
-    std::vector<grid_coord> s_moves = new_board.get_valid_moves();
-    int rnum = rand() % (int)s_moves.size();
-    grid_coord move = s_moves[rnum];
+    new_board.random_move(move); // allocation-free uniform legal move
     new_board.move(move);
   }
   return new_board;
 }
 
 MCTSNode::~MCTSNode() {
+  // Erase exactly this node's transposition entry. The table is shared with the
+  // search thread, so take tree_lock (recursive: a destructor can fire while a
+  // prune already holds it on this thread). wp is expired by now, so identify our
+  // entry by raw pointer among any bucket-mates that share the hash.
+  std::lock_guard<std::recursive_mutex> guard(tree->tree_lock);
   tree->total_fillicides++;
-  tree->transposition_table.erase(tree->transposition_table.find(board));
+  uint64_t key = board.hash();
+  auto range = tree->transposition_table.equal_range(key);
+  for (auto it = range.first; it != range.second; ++it) {
+    if (it->second.self == this) {
+      tree->transposition_table.erase(it);
+      break;
+    }
+  }
 }
 
 void MCTSTree::mcts(std::shared_ptr<MCTSNode> node, int num_iterations) {

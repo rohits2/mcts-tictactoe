@@ -9,11 +9,17 @@ void MCTSBackgroundWorker::do_work() {
     Board current = board;
     board_lock.unlock();
 
-    // On a board change (or when we have blown the memory budget) collapse the
-    // branches that are no longer reachable, so both search effort and memory
-    // stay concentrated on the live position.
-    if (dirty || tree.transposition_size() > max_tree_size) {
+    // On a board change, collapse the branches that are no longer reachable so
+    // both search effort and memory stay concentrated on the live position.
+    if (dirty) {
       tree.prune_feather(current);
+    }
+
+    // If the live subtree itself has blown the memory budget, reachability
+    // pruning can't help (it is all reachable). Use alpha-beta to discard the
+    // branches that cannot change optimal play from here.
+    if (tree.transposition_size() > max_tree_size) {
+      tree.prune_alpha_beta(current);
     }
 
     // Always make progress on the current root. This is what guarantees a
