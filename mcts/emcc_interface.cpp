@@ -58,7 +58,7 @@ int test_main() {
     MCTSTree supertree;
     std::shared_ptr<MCTSNode> node = supertree.get_node(board, nullptr);
     supertree.mcts(board, 50000);
-    printf("%u/%u\n", node->wins, node->visits);
+    printf("%u/%u\n", node->wins.load(), node->visits.load());
     grid_coord move = node->get_move();
     printf("%d, %d, %d, %d\n", move.m_i, move.m_j, move.i, move.j);
     return 0;

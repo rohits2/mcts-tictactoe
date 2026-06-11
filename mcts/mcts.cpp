@@ -30,7 +30,11 @@ std::shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, std::shared
       continue;
     }
     if (node->board == new_board) {
-      if (node->parents.size() == 0 && new_parent != nullptr) {
+      // Order matters: the UI thread calls get_node(board, nullptr), so testing
+      // new_parent first short-circuits and never touches node->parents -- which
+      // the worker thread mutates under the node lock. parents is thus only ever
+      // accessed from the single search thread.
+      if (new_parent != nullptr && node->parents.size() == 0) {
         auto itr = std::find(roots.begin(), roots.end(), node);
         if (itr != roots.end()) {
           roots.erase(itr);
@@ -39,8 +43,8 @@ std::shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, std::shared
       if (new_parent != nullptr) {
         node->parents.push_back(new_parent);
       }
+      total_hits++; // under tree_lock, like total_lookups
       tree_lock.unlock();
-      total_hits++;
       return node;
     }
     ++it; // same hash, different board: a genuine collision, keep probing

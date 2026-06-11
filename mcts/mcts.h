@@ -2,6 +2,7 @@
 #define MCTS_H
 #include "board.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -74,10 +75,13 @@ public:
   MCTSTree *tree;
   std::vector<std::weak_ptr<MCTSNode>> parents;
   std::vector<std::shared_ptr<MCTSNode>> children;
-  unsigned visits = 0;
-  unsigned wins = 0;
-  unsigned ties = 0;
-  bool expanded = false;
+  // Atomic because the search (worker) thread mutates these while the UI thread
+  // reads them (get_value, win/tie probabilities), and select() bumps the leaf's
+  // visit count without holding the node lock.
+  std::atomic<unsigned> visits{0};
+  std::atomic<unsigned> wins{0};
+  std::atomic<unsigned> ties{0};
+  std::atomic<bool> expanded{false};
   mutable std::recursive_mutex lock;
   float Q();
   float parent_Q();
