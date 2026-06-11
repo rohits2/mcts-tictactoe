@@ -129,15 +129,23 @@ function computerMove(grid) {
   if (board.majorTile != null) {
     [oI, oJ] = board.majorTile;
   }
-  var iMove = getMove(board.board, board.player, oI, oJ);
-  [cI, cJ, cII, cJJ] =
-    [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
-
-
-  while(!board.move(cI, cJ, cII, cJJ)){
-    iMove = getMove(board.board, board.player, oI, oJ);
+  // Ask the engine for a move, but never spin forever. If it keeps handing back
+  // an unplayable move (e.g. the free-choice case, where you're sent to an
+  // already-won supercell), fall back to a known-valid move so the game can't
+  // lock up.
+  let played = false;
+  for (let attempt = 0; attempt < 8 && !played; attempt++) {
+    var iMove = getMove(board.board, board.player, oI, oJ);
     [cI, cJ, cII, cJJ] =
       [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
+    played = board.move(cI, cJ, cII, cJJ);
+  }
+  if (!played) {
+    let validMoves = board.getValidMoves();
+    if (validMoves.length) {
+      [cI, cJ, cII, cJJ] = validMoves[0];
+      board.move(cI, cJ, cII, cJJ);
+    }
   }
 
   drawScores();
@@ -178,9 +186,11 @@ function updateScoreReadout() {
   let pct = v => (100 * v).toFixed(1) + '%';
   let x = xScores[xScores.length - 1];
   let o = oScores[oScores.length - 1];
+  let tie = Math.max(0, 1 - x - o);
   el.innerHTML =
     '<span class="readout-x">X: ' + pct(x) + '</span>' +
-    '<span class="readout-o">O: ' + pct(o) + '</span>';
+    '<span class="readout-o">O: ' + pct(o) + '</span>' +
+    '<span class="readout-tie">Tie: ' + pct(tie) + '</span>';
 }
 
 function drawScores() {
@@ -200,19 +210,22 @@ function drawScores() {
 
   var iScore = getValue(board.board, board.player, oI, oJ);
 
-  // Keep both series dense by carrying each player's last estimate forward.
-  // Previously only the mover's array got a value and the other got a null;
-  // a leading null breaks Chartist's cardinal interpolation, so the O line
-  // (which always started with a null) never rendered.
-  let lastX = xScores.length ? xScores[xScores.length - 1] : 0.5;
-  let lastO = oScores.length ? oScores[oScores.length - 1] : 0.5;
+  // get_value returns the win-probability for the player to move, and
+  // drawScores only runs on the human's turn -- so only one side was ever
+  // sampled, which left the other line frozen. Derive the opponent's value as
+  // the complement so both lines track every move. (A true 3-way X/O/Tie split
+  // needs the engine to expose tie counts; the readout below already shows
+  // Tie = 1 - X - O, which becomes nonzero once that data is wired in.)
+  let xVal, oVal;
   if (board.player == PLAYER_X) {
-    lastX = iScore;
-  } else if (board.player == PLAYER_O) {
-    lastO = iScore;
+    xVal = iScore;
+    oVal = 1 - iScore;
+  } else {
+    oVal = iScore;
+    xVal = 1 - iScore;
   }
-  xScores.push(lastX);
-  oScores.push(lastO);
+  xScores.push(xVal);
+  oScores.push(oVal);
 
   if (board.gameWinner() != 0) {
     if (board.gameWinner() == -1) {         // X wins
