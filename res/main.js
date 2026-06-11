@@ -258,7 +258,7 @@ function drawScores() {
       ]
     }, {
         height: "200px",
-        width: "auto",
+        fullWidth: true,
         chartPadding: {
           right: 10
         },

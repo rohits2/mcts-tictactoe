@@ -21,6 +21,9 @@
         /* Fixed-width, right-aligned, tabular numerals so the values don't jump
            around as their digit counts change. */
         .tree-stats td.ts-val { text-align: right; min-width: 5.5em; font-variant-numeric: tabular-nums; }
+        /* Chart fills the full column width, with smaller data points. */
+        .score-chart, .score-chart svg, .score-chart .ct-chart-line { width: 100%; }
+        .score-chart .ct-point { stroke-width: 4px; }
     </style>
 </head>
 
