@@ -11,11 +11,11 @@ static constexpr int ITERS_PER_STEP = 16384;
 
 class MCTSBackgroundWorker {
 public:
-  MCTSBackgroundWorker() : max_tree_size(MAX_TREE_SIZE), iters_per_step(ITERS_PER_STEP){
-       work_thread = std::thread(&MCTSBackgroundWorker::do_work, this); 
+  MCTSBackgroundWorker() : max_tree_size(MAX_TREE_SIZE), iters_per_step(ITERS_PER_STEP), board_change_semaphore(0){
+       work_thread = std::thread(&MCTSBackgroundWorker::do_work, this);
   }
-  MCTSBackgroundWorker(int max_tree_size, int iters_per_step) : max_tree_size(max_tree_size), iters_per_step(iters_per_step){
-     work_thread = std::thread(&MCTSBackgroundWorker::do_work, this); 
+  MCTSBackgroundWorker(int max_tree_size, int iters_per_step) : max_tree_size(max_tree_size), iters_per_step(iters_per_step), board_change_semaphore(0){
+     work_thread = std::thread(&MCTSBackgroundWorker::do_work, this);
   }
 
   void set_board(const Board &board);
