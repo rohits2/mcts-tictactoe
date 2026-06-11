@@ -53,7 +53,7 @@ function subgridWinner(grid: Int8Array, m_i: number, m_j: number) {
     for (let j = 0; j < 3; j++) {
       rowSum += grid[(3 * m_i + i) * 9 + j + 3 * m_j];
       colSum += grid[(3 * m_i + j) * 9 + i + 3 * m_j];
-      nonzeroCount += grid[(3 * m_i + i) * 3 + j + 3 * m_j] ? 1 : 0;
+      nonzeroCount += grid[(3 * m_i + i) * 9 + j + 3 * m_j] ? 1 : 0;
     }
     if (rowSum == 3 * PLAYER_X || colSum == 3 * PLAYER_X) {
       return PLAYER_X;

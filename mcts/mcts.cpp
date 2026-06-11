@@ -386,7 +386,11 @@ Board simulate(const Board &board) {
   Board new_board(board);
   grid_coord move;
   while (new_board.game_winner() == PLAYER_NONE) {
-    new_board.random_move(move); // allocation-free uniform legal move
+    // A non-terminal position should always have a legal move; bail rather than
+    // spin if a degenerate (e.g. externally-supplied) state ever has none.
+    if (!new_board.random_move(move)) {
+      break;
+    }
     new_board.move(move);
   }
   return new_board;

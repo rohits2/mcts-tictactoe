@@ -152,6 +152,16 @@ Board::Board(const char grid[9][9], const int active_player, const supergrid_coo
   player = active_player;
   major_tile = active_tile;
   recompute_all();
+  // Match move()'s rule: if the supplied forced subgrid is already closed, the
+  // next player may move anywhere. Without this, an externally-supplied tile
+  // pointing into a won/tied subgrid would be a non-terminal position with no
+  // legal moves -- a state the search cannot handle.
+  if (major_tile.i >= 0 && major_tile.j >= 0) {
+    int sg = major_tile.i * 3 + major_tile.j;
+    if ((sclosed >> sg) & 1) {
+      major_tile = {.i = -1, .j = -1};
+    }
+  }
 }
 
 /*
