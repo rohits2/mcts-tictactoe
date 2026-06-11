@@ -11,6 +11,7 @@ const EXTERIOR_BORDER_WIDTH = 2.0
 const X_COLOR = '#FF9933'
 const O_COLOR = '#3399FF'
 const LINK_COLOR = '#009933'
+const HINT_COLOR = '#0b6e2e'
 const SMALL_SYM_WIDTH = 1.0
 const BIG_SYM_WIDTH = 4.0
 
@@ -82,6 +83,15 @@ class Grid {
     let y = i * SUPERGRID_WIDTH + SUPERGRID_WIDTH / 2;
     this.svg.add(new Circle(
         x, y, SUPERGRID_WIDTH / 2 - MARKING_OFFSET, O_COLOR, BIG_SYM_WIDTH));
+  }
+
+  // Draw a small label (e.g. a win-probability hint) centered in a cell.
+  drawHint(i: number, j: number, ii: number, jj: number, text: string) {
+    let x = j * SUPERGRID_WIDTH + jj * GRID_WIDTH + INTERIOR_OFFSET +
+        GRID_WIDTH / 2;
+    let y = i * SUPERGRID_WIDTH + ii * GRID_WIDTH + INTERIOR_OFFSET +
+        GRID_WIDTH / 2;
+    this.svg.add(new Label(x, y, text, HINT_COLOR, GRID_WIDTH * 0.3));
   }
 
   render(): string {

@@ -99,3 +99,27 @@ class Circle extends Renderable {
         this.color}; stroke-width:${this.width}; fill: none" />`
   }
 }
+
+class Label extends Renderable {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  size: number;
+  constructor(
+      x: number, y: number, text: string, color: string, size: number) {
+    super();
+    this.x = x;
+    this.y = y;
+    this.text = text;
+    this.color = color;
+    this.size = size;
+  }
+  render(): string {
+    // pointer-events:none so the label never intercepts a click on the valid-move
+    // rect underneath it.
+    return `<text x="${this.x}" y="${this.y}" font-size="${this.size}" fill="${
+        this.color}" text-anchor="middle" dominant-baseline="central" style="font-family: monospace; font-weight: bold; pointer-events: none;">${
+        this.text}</text>`
+  }
+}

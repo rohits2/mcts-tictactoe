@@ -55,20 +55,26 @@ grid_coord MCTSBackgroundWorker::get_move(const Board &board) {
 
 policy_vec MCTSBackgroundWorker::get_policy(const Board &board) { return tree.get_node(board, nullptr)->get_policy(); }
 
-float MCTSBackgroundWorker::get_value(const Board &board) { return tree.get_node(board, nullptr)->Q(); }
+// Value / win / tie probabilities for the player to move, read straight from the
+// node's visit counts (wins and ties are accumulated from the mover's perspective
+// in MCTSNode::backpropagate). These use the read-only find_node so querying many
+// positions (e.g. the per-move hints) never inserts or roots a node; an
+// un-searched position reads as 0.
+float MCTSBackgroundWorker::get_value(const Board &board) {
+  std::shared_ptr<MCTSNode> node = tree.find_node(board);
+  return node ? node->Q() : 0.0f;
+}
 
-// Win / tie probabilities for the player to move, read straight from the node's
-// visit counts (wins and ties are accumulated from the mover's perspective in
-// MCTSNode::backpropagate). get_value() blends these into one scalar; the chart
-// needs them separated to show X / O / Tie.
 float MCTSBackgroundWorker::get_win_prob(const Board &board) {
-  std::shared_ptr<MCTSNode> node = tree.get_node(board, nullptr);
+  std::shared_ptr<MCTSNode> node = tree.find_node(board);
+  if (!node) return 0.0f;
   std::lock_guard<std::recursive_mutex> guard(node->lock);
   return node->visits > 0 ? (float)node->wins / node->visits : 0.0f;
 }
 
 float MCTSBackgroundWorker::get_tie_prob(const Board &board) {
-  std::shared_ptr<MCTSNode> node = tree.get_node(board, nullptr);
+  std::shared_ptr<MCTSNode> node = tree.find_node(board);
+  if (!node) return 0.0f;
   std::lock_guard<std::recursive_mutex> guard(node->lock);
   return node->visits > 0 ? (float)node->ties / node->visits : 0.0f;
 }

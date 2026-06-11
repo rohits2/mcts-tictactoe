@@ -30,6 +30,7 @@ var statsTimer = null;
 var prevRollouts = 0;
 var prevStatsTime = 0;
 var engineGen = 0; // bumped to cancel any in-flight engine-move poll loop
+var showHelp = false; // overlay per-move win probabilities ("Show Help")
 
 
 /**
@@ -160,6 +161,7 @@ function draw() {
     return;
   }
   drawMoves(grid);
+  drawHints(grid);
   gridDiv.innerHTML = grid.render();
   linkMoves(grid);
 }
@@ -399,9 +401,15 @@ function updateTreeStats() {
     try { mem = heapBytes(); } catch (e) {}
     let memMB = Number.isFinite(mem) ? (mem / 1048576).toFixed(0) : '--';
     el.innerHTML =
-      '<span class="stat">Nodes: ' + fmtCount(nodes) + '</span>' +
-      '<span class="stat">' + fmtCount(rate) + ' rollouts/s</span>' +
-      '<span class="stat">Heap: ' + memMB + ' MB</span>';
+      '<table>' +
+      '<tr><td class="ts-key">nodes</td><td class="ts-val">' + fmtCount(nodes) + '</td></tr>' +
+      '<tr><td class="ts-key">rollout/s</td><td class="ts-val">' + fmtCount(rate) + '</td></tr>' +
+      '<tr><td class="ts-key">mem</td><td class="ts-val">' + memMB + ' MB</td></tr>' +
+      '</table>';
+    // Keep the per-move hints fresh while Help is on and it's the human's turn.
+    if (showHelp && moveOk && board && board.gameWinner() == PLAYER_NONE) {
+      draw();
+    }
   } catch (e) {}
 }
 
@@ -436,3 +444,50 @@ function onReady() {
   }
   setTimeout(pollReady, 300); // also covers calledRun==true and a missed hook
 })();
+
+/**
+ * Make an independent copy of a board so we can try a move on it without
+ * disturbing the live game.
+ */
+function cloneBoard(b) {
+  let c = new Board();
+  c.board = b.board.slice();
+  c.supergrid = b.supergrid.slice();
+  c.player = b.player;
+  c.majorTile = b.majorTile != null ? [b.majorTile[0], b.majorTile[1]] : null;
+  return c;
+}
+
+/**
+ * When Help is on, overlay each valid move with the win probability for the
+ * player to move if they play there, read from the background search.
+ */
+function drawHints(grid) {
+  if (!showHelp || !runtimeReady || !board) return;
+  if (board.gameWinner() != PLAYER_NONE) return;
+  board.getValidMoves().forEach(move => {
+    let [i, j, ii, jj] = move;
+    let child = cloneBoard(board);
+    child.move(i, j, ii, jj);
+    let [cI, cJ] = child.majorTile != null ? child.majorTile : [-1, -1];
+    let p = 0;
+    try {
+      // child.player is the OPPONENT (to move after our move), so the
+      // mover-here win probability is the remainder after their win + tie.
+      let oppWin = getWinProb(child.board, child.player, cI, cJ);
+      let oppTie = getTieProb(child.board, child.player, cI, cJ);
+      p = Math.max(0, Math.min(1, 1 - oppWin - oppTie));
+    } catch (e) {}
+    grid.drawHint(i, j, ii, jj, Math.round(p * 100) + '%');
+  });
+}
+
+/**
+ * Toggle the per-move win-probability hints (the "Show Help" button).
+ */
+function toggleHints() {
+  showHelp = !showHelp;
+  let btn = document.getElementById('hint-button');
+  if (btn) btn.innerText = showHelp ? 'Hide Help' : 'Show Help';
+  if (board && moveOk) draw(); // redraw immediately if it's the human's turn
+}
