@@ -1,6 +1,8 @@
 var getMove = cwrap('get_move', 'number', ['array', 'number', 'number', 'number']);
 var getTranspositionSize = cwrap('transposition_table_size', 'number', []);
 var getValue = cwrap('get_value', 'number', ['array', 'number', 'number', 'number']);
+var getWinProb = cwrap('get_win_prob', 'number', ['array', 'number', 'number', 'number']);
+var getTieProb = cwrap('get_tie_prob', 'number', ['array', 'number', 'number', 'number']);
 var board;
 var gridDiv;
 var chart;
@@ -208,21 +210,21 @@ function drawScores() {
     getMove(board.board, board.player, oI, oJ);
   }
 
-  var iScore = getValue(board.board, board.player, oI, oJ);
-
-  // get_value returns the win-probability for the player to move, and
-  // drawScores only runs on the human's turn -- so only one side was ever
-  // sampled, which left the other line frozen. Derive the opponent's value as
-  // the complement so both lines track every move. (A true 3-way X/O/Tie split
-  // needs the engine to expose tie counts; the readout below already shows
-  // Tie = 1 - X - O, which becomes nonzero once that data is wired in.)
+  // Pull the win and tie rates for the player to move straight from the search
+  // tree's visit counts, then map them onto X and O. drawScores only runs on
+  // the player-to-move's turn, but win + tie + loss covers all three outcomes,
+  // so the opponent's win probability is just the remainder. (get_value returns
+  // a single blended scalar that can't be split back into win vs tie.)
+  let moverWin = getWinProb(board.board, board.player, oI, oJ);
+  let moverTie = getTieProb(board.board, board.player, oI, oJ);
+  let oppWin = Math.max(0, 1 - moverWin - moverTie);
   let xVal, oVal;
   if (board.player == PLAYER_X) {
-    xVal = iScore;
-    oVal = 1 - iScore;
+    xVal = moverWin;
+    oVal = oppWin;
   } else {
-    oVal = iScore;
-    xVal = 1 - iScore;
+    oVal = moverWin;
+    xVal = oppWin;
   }
   xScores.push(xVal);
   oScores.push(oVal);

@@ -17,6 +17,18 @@ extern "C" float get_value(char grid[9][9], int player, int i, int j) {
     return Q;
 }
 
+extern "C" float get_win_prob(char grid[9][9], int player, int i, int j) {
+    supergrid_coord major_tile{i, j};
+    Board board(grid, player, major_tile);
+    return worker->get_win_prob(board);
+}
+
+extern "C" float get_tie_prob(char grid[9][9], int player, int i, int j) {
+    supergrid_coord major_tile{i, j};
+    Board board(grid, player, major_tile);
+    return worker->get_tie_prob(board);
+}
+
 extern "C" int get_move(char grid[9][9], int player, int i, int j) {
     supergrid_coord major_tile{i, j};
     Board board(grid, player, major_tile);
