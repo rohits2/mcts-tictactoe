@@ -19,6 +19,7 @@ function init() {
   player = PLAYER_X;
   xScores = [];
   oScores = [];
+  updateScoreReadout();
   draw();
 }
 /**
@@ -34,6 +35,7 @@ function initO() {
 
   xScores = [];
   oScores = [];
+  updateScoreReadout();
 
   board.move(cI, cJ, cII, cJJ);
 
@@ -163,6 +165,24 @@ function range(size, startAt = 0) {
   return [...Array(size).keys()].map(i => i + startAt);
 }
 
+/**
+ * Update the numeric current X/O win-probability readout below the chart.
+ */
+function updateScoreReadout() {
+  let el = document.getElementById('score-readout');
+  if (!el) return;
+  if (!xScores.length || !oScores.length) {
+    el.innerHTML = "No data yet!";
+    return;
+  }
+  let pct = v => (100 * v).toFixed(1) + '%';
+  let x = xScores[xScores.length - 1];
+  let o = oScores[oScores.length - 1];
+  el.innerHTML =
+    '<span class="readout-x">X: ' + pct(x) + '</span>' +
+    '<span class="readout-o">O: ' + pct(o) + '</span>';
+}
+
 function drawScores() {
   let scoreDiv = document.getElementById('score-chart');
   scoreDiv.innerHTML = "";
@@ -180,23 +200,31 @@ function drawScores() {
 
   var iScore = getValue(board.board, board.player, oI, oJ);
 
+  // Keep both series dense by carrying each player's last estimate forward.
+  // Previously only the mover's array got a value and the other got a null;
+  // a leading null breaks Chartist's cardinal interpolation, so the O line
+  // (which always started with a null) never rendered.
+  let lastX = xScores.length ? xScores[xScores.length - 1] : 0.5;
+  let lastO = oScores.length ? oScores[oScores.length - 1] : 0.5;
   if (board.player == PLAYER_X) {
-    xScores.push(iScore);
-    oScores.push(null);
+    lastX = iScore;
   } else if (board.player == PLAYER_O) {
-    oScores.push(iScore);
-    xScores.push(null);
+    lastO = iScore;
   }
-  if(board.gameWinner() != 0){
-    if(board.gameWinner() == -1){
-      xScores.push(1);
-    }else if(board.gameWinner() == 1){
-      oScores.push(0);
-    }else{
-      xScores.push(0.5);
-      oScores.push(0.5);
+  xScores.push(lastX);
+  oScores.push(lastO);
+
+  if (board.gameWinner() != 0) {
+    if (board.gameWinner() == -1) {         // X wins
+      xScores.push(1); oScores.push(0);
+    } else if (board.gameWinner() == 1) {   // O wins
+      xScores.push(0); oScores.push(1);
+    } else {                                // draw
+      xScores.push(0.5); oScores.push(0.5);
     }
   }
+
+  updateScoreReadout();
 
   chart = new Chartist.Line('.score-chart', {
     labels: range(xScores.length, 1),

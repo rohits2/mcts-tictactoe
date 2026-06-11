@@ -228,3 +228,19 @@ details[open] summary:before {
     stroke: #2288EE;
 }
 
+.score-readout {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 0.5rem;
+    font-size: 1.15rem;
+    font-weight: bold;
+}
+
+.readout-x {
+    color: #FF9933;
+}
+
+.readout-o {
+    color: #2288EE;
+}
+
