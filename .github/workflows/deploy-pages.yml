@@ -1,0 +1,97 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment, cancelling in-progress runs of this group.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.61
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install TypeScript
+        run: npm install -g typescript@5
+
+      - name: Build TypeScript -> lib/*.js
+        # tsc emits JS even when it reports type errors against the browser
+        # globals (cwrap, Chartist, DOM); that is how the original Makefile builds.
+        run: tsc lib/game.ts lib/grid.ts lib/svg.ts || true
+
+      - name: Build WASM (mcts.js / mcts.wasm)
+        run: |
+          emcc -O3 -DPROC_COUNT=4 \
+            -lpthread -s USE_PTHREADS=1 -s PROXY_TO_PTHREAD \
+            -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
+            -s 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]' \
+            -s EXPORTED_FUNCTIONS='["_get_move","_transposition_table_size","_get_value","_main"]' \
+            -std=c++17 -o mcts/mcts.js \
+            mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp mcts/worker.cpp
+
+      - name: Assemble _site
+        run: |
+          set -euo pipefail
+          mkdir -p _site/res _site/lib _site/mcts
+
+          # Root index: inject the COOP/COEP service worker as the first <head> script.
+          sed 's#<head>#<head>\n    <script src="/coi-serviceworker.js"></script>#' \
+            res/index.htm > _site/index.html
+          cp coi-serviceworker.js _site/coi-serviceworker.js
+
+          # Static assets referenced by the page.
+          cp res/main.js res/material.css res/favicon.png res/favicon.svg _site/res/
+          cp res/404.htm _site/404.html
+
+          # TypeScript build output.
+          cp lib/game.js lib/grid.js lib/svg.js _site/lib/
+
+          # Chartist (the original repo vendors it as a git submodule; pin the
+          # equivalent release here so CI does not depend on the SSH submodule).
+          curl -fsSL https://unpkg.com/chartist@0.11.4/dist/chartist.min.js  -o _site/lib/chartist.js
+          curl -fsSL https://unpkg.com/chartist@0.11.4/dist/chartist.min.css -o _site/lib/chartist.css
+
+          # WASM artifacts. The pthread worker file only exists on some
+          # emscripten versions, so copy it conditionally.
+          cp mcts/mcts.js mcts/mcts.wasm _site/mcts/
+          if [ -f mcts/mcts.worker.js ]; then cp mcts/mcts.worker.js _site/mcts/; fi
+
+          # Custom domain for GitHub Pages.
+          echo "mcts.epigram.dev" > _site/CNAME
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
