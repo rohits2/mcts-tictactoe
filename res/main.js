@@ -204,19 +204,24 @@ function drawScores() {
   if (board.majorTile != null) {
     [oI, oJ] = board.majorTile;
   }
-  // Ensure that the MCTS engine has some data so that the first x-score is not 0.
-  if(!mctsInitialized){
-    mctsInitialized = true;
-    getMove(board.board, board.player, oI, oJ);
-  }
-
   // Pull the win and tie rates for the player to move straight from the search
   // tree's visit counts, then map them onto X and O. drawScores only runs on
   // the player-to-move's turn, but win + tie + loss covers all three outcomes,
   // so the opponent's win probability is just the remainder. (get_value returns
   // a single blended scalar that can't be split back into win vs tie.)
-  let moverWin = getWinProb(board.board, board.player, oI, oJ);
-  let moverTie = getTieProb(board.board, board.player, oI, oJ);
+  //
+  // Do NOT call get_move here just to prime data: it now blocks until
+  // MIN_VISITS_PER_MOVE rollouts, and blocking on the browser's main thread
+  // stalls the whole render so the chart never draws. The background worker
+  // already searches the live position, so just read it; fall back to 50/50 if
+  // a read fails so the chart still renders.
+  let moverWin = 0.5, moverTie = 0;
+  try {
+    moverWin = getWinProb(board.board, board.player, oI, oJ);
+    moverTie = getTieProb(board.board, board.player, oI, oJ);
+  } catch (e) {
+    console.error('drawScores: win/tie probability read failed', e);
+  }
   let oppWin = Math.max(0, 1 - moverWin - moverTie);
   let xVal, oVal;
   if (board.player == PLAYER_X) {
@@ -241,38 +246,42 @@ function drawScores() {
 
   updateScoreReadout();
 
-  chart = new Chartist.Line('.score-chart', {
-    labels: range(xScores.length, 1),
-    series: [
-      {
-        className: "series-x",
-        name: "X",
-        data: xScores
-      },
-      {
-        className: "series-o",
-        name: "O",
-        data: oScores
-      }
-    ]
-  }, {
-      height: "200px",
-      width: "auto",
-      chartPadding: {
-        right: 10
-      },
-      lineSmooth: Chartist.Interpolation.cardinal({
-        fillHoles: true,
-      }),
-      axisX: {
-        showLabel: false,
-        offset: 0
-      },
-      axisY: {
-        type: Chartist.FixedScaleAxis,
-        low: 0,
-        high: 1.25,
-        divisor: 5
-      }
-    });
+  try {
+    chart = new Chartist.Line('.score-chart', {
+      labels: range(xScores.length, 1),
+      series: [
+        {
+          className: "series-x",
+          name: "X",
+          data: xScores
+        },
+        {
+          className: "series-o",
+          name: "O",
+          data: oScores
+        }
+      ]
+    }, {
+        height: "200px",
+        width: "auto",
+        chartPadding: {
+          right: 10
+        },
+        lineSmooth: Chartist.Interpolation.cardinal({
+          fillHoles: true,
+        }),
+        axisX: {
+          showLabel: false,
+          offset: 0
+        },
+        axisY: {
+          type: Chartist.FixedScaleAxis,
+          low: 0,
+          high: 1.25,
+          divisor: 5
+        }
+      });
+  } catch (e) {
+    console.error('drawScores: chart render failed', e);
+  }
 }
