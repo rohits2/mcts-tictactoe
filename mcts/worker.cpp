@@ -73,4 +73,25 @@ float MCTSBackgroundWorker::get_tie_prob(const Board &board) {
   return node->visits > 0 ? (float)node->ties / node->visits : 0.0f;
 }
 
-int MCTSBackgroundWorker::transposition_table_size() const { return tree.transposition_table.size(); }
+int MCTSBackgroundWorker::transposition_table_size() {
+  // Read under the lock: size() concurrent with the search thread's insert/erase
+  // would otherwise be a data race on the container.
+  std::lock_guard<std::recursive_mutex> guard(tree.tree_lock);
+  return tree.transposition_table.size();
+}
+
+// Non-blocking: read the current best move / visit count straight from the live
+// search tree (the worker keeps deepening it in the background). find_node is a
+// pure read -- it never inserts or roots a node -- so polling cannot mutate the
+// tree or leak orphan roots. An absent position reads as "no move / 0 visits".
+grid_coord MCTSBackgroundWorker::peek_move(const Board &board) {
+  std::shared_ptr<MCTSNode> node = tree.find_node(board);
+  return node ? node->get_move() : grid_coord{-1, -1, -1, -1};
+}
+
+unsigned MCTSBackgroundWorker::node_visits(const Board &board) {
+  std::shared_ptr<MCTSNode> node = tree.find_node(board);
+  return node ? node->visits.load() : 0u;
+}
+
+long long MCTSBackgroundWorker::rollouts() const { return tree.total_iterations; }

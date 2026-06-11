@@ -43,14 +43,18 @@ class MCTSTree {
 public:
   std::recursive_mutex tree_lock;
   std::unordered_multimap<uint64_t, NodeRef> transposition_table;
-  long long total_lookups = 0;
-  long long total_hits = 0;
-  long long total_fillicides = 0;
+  // Atomic so the UI thread can read them lock-free for the stats display while
+  // the search thread increments them.
+  std::atomic<long long> total_lookups{0};
+  std::atomic<long long> total_hits{0};
+  std::atomic<long long> total_fillicides{0};
+  std::atomic<long long> total_iterations{0}; // cumulative MCTS rollouts (for rollouts/sec)
   // roots is declared last so it is destroyed first: nodes' destructors touch the
   // table and tree_lock, which must still be alive when they run.
   std::vector<std::shared_ptr<MCTSNode>> roots;
   MCTSTree();
   std::shared_ptr<MCTSNode> get_node(const Board &new_board, std::shared_ptr<MCTSNode> new_parent);
+  std::shared_ptr<MCTSNode> find_node(const Board &new_board); // read-only lookup; never inserts/roots
   float transposition_hitrate();
   int transposition_size();
   long long purges();

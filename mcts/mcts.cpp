@@ -58,6 +58,21 @@ std::shared_ptr<MCTSNode> MCTSTree::get_node(const Board &new_board, std::shared
   return node;
 }
 
+std::shared_ptr<MCTSNode> MCTSTree::find_node(const Board &new_board) {
+  // Read-only counterpart to get_node: looks the position up without inserting a
+  // node or pushing a root, so the polling/stats UI never mutates the tree.
+  std::lock_guard<std::recursive_mutex> guard(tree_lock);
+  uint64_t key = new_board.hash();
+  auto range = transposition_table.equal_range(key);
+  for (auto it = range.first; it != range.second; ++it) {
+    std::shared_ptr<MCTSNode> node = it->second.wp.lock();
+    if (node && node->board == new_board) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
 // Alpha-beta pruning over the already-built search tree. Rather than the old
 // visit-count / Q-threshold heuristics, this discards exactly the branches a
 // minimax searcher would never have to look at: it runs alpha-beta with
@@ -427,6 +442,7 @@ void MCTSTree::mcts(std::shared_ptr<MCTSNode> node, int num_iterations) {
       leaf->expand();
     }
   }
+  total_iterations += num_iterations;
 }
 
 void MCTSTree::mcts(const Board &board, int num_iterations) {

@@ -14,10 +14,10 @@ lib/game.js lib/grid.js lib/svg.js: lib/game.ts lib/grid.ts lib/svg.ts
 	tsc lib/game.ts lib/grid.ts lib/svg.ts
 
 mcts/mcts.wasm mcts/mcts.worker.js mcts/mcts.js: mcts/board.cpp mcts/board.h mcts/emcc_interface.cpp mcts/mcts.cpp mcts/mcts.h mcts/worker.h mcts/worker.cpp
-	emcc -O3 -DPROC_COUNT=4 $(WPTHREADS) $(WWASM) -s 'EXPORTED_RUNTIME_METHODS=["cppall", "cwrap"]' -s EXPORTED_FUNCTIONS='["_get_move", "_transposition_table_size", "_get_value", "_main"]' -std=c++17 -o mcts/mcts.js mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp mcts/worker.cpp
+	emcc -O3 -DPROC_COUNT=4 $(WPTHREADS) $(WWASM) -s 'EXPORTED_RUNTIME_METHODS=["cppall", "cwrap"]' -s EXPORTED_FUNCTIONS='["_get_move", "_transposition_table_size", "_get_value", "_get_win_prob", "_get_tie_prob", "_ponder", "_peek_move", "_node_visits", "_rollouts", "_heap_bytes", "_is_ready", "_main"]' -std=c++17 -o mcts/mcts.js mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp mcts/worker.cpp
 
 mcts-debug: mcts/board.cpp mcts/board.h mcts/emcc_interface.cpp mcts/mcts.cpp mcts/mcts.h mcts/worker.h mcts/worker.cpp
-	emcc $(WPTHREADS) $(WWASM) --source-map-base "" -s DEMANGLE_SUPPORT=1 -s EXCEPTION_DEBUG=1 -s ASSERTIONS=1 -s SAFE_HEAP=1 -g -DPROC_COUNT=1 -s 'EXPORTED_RUNTIME_METHODS=["cppall", "cwrap"]' -s EXPORTED_FUNCTIONS='["_get_move", "_transposition_table_size", "_get_value", "_main"]' -std=c++17 -o mcts/mcts.js mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp mcts/worker.cpp
+	emcc $(WPTHREADS) $(WWASM) --source-map-base "" -s DEMANGLE_SUPPORT=1 -s EXCEPTION_DEBUG=1 -s ASSERTIONS=1 -s SAFE_HEAP=1 -g -DPROC_COUNT=1 -s 'EXPORTED_RUNTIME_METHODS=["cppall", "cwrap"]' -s EXPORTED_FUNCTIONS='["_get_move", "_transposition_table_size", "_get_value", "_get_win_prob", "_get_tie_prob", "_ponder", "_peek_move", "_node_visits", "_rollouts", "_heap_bytes", "_is_ready", "_main"]' -std=c++17 -o mcts/mcts.js mcts/mcts.cpp mcts/board.cpp mcts/emcc_interface.cpp mcts/worker.cpp
 
 mcts/libmcts.so: mcts/board.cpp mcts/board.h mcts/emcc_interface.cpp mcts/mcts.cpp mcts/mcts.h mcts/worker.h mcts/worker.cpp
 	#

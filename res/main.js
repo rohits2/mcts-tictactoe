@@ -3,46 +3,66 @@ var getTranspositionSize = cwrap('transposition_table_size', 'number', []);
 var getValue = cwrap('get_value', 'number', ['array', 'number', 'number', 'number']);
 var getWinProb = cwrap('get_win_prob', 'number', ['array', 'number', 'number', 'number']);
 var getTieProb = cwrap('get_tie_prob', 'number', ['array', 'number', 'number', 'number']);
+// Non-blocking engine API: keep the background search pointed at the live
+// position (ponder), then poll it for a move instead of blocking the UI thread.
+var ponderBoard = cwrap('ponder', null, ['array', 'number', 'number', 'number']);
+var peekMove = cwrap('peek_move', 'number', ['array', 'number', 'number', 'number']);
+var nodeVisits = cwrap('node_visits', 'number', ['array', 'number', 'number', 'number']);
+var rolloutCount = cwrap('rollouts', 'number', []);
+var heapBytes = cwrap('heap_bytes', 'number', []);
+var isReady = cwrap('is_ready', 'number', []);
+
+// Let the background search add this many FRESH rollouts to the live position
+// before the engine commits a move, or the time budget elapses -- whichever comes
+// first. (Fresh, not cumulative, so a deeply-pondered position still gets real
+// search rather than committing instantly.)
+var VISIT_TARGET = 100000;
+var TIME_BUDGET_MS = 4000;
+
 var board;
 var gridDiv;
 var chart;
 var xScores = [];
 var oScores = [];
-var mctsInitialized = false;
+var runtimeReady = false; // set only once the WASM worker actually exists
 var moveOk = true;
+var statsTimer = null;
+var prevRollouts = 0;
+var prevStatsTime = 0;
+var engineGen = 0; // bumped to cancel any in-flight engine-move poll loop
 
 
 /**
  * Set up the board and SVG holders.
  */
 function init() {
+  engineGen++; // cancel any engine-move poll still running from a previous game
   board = new Board();
   gridDiv = document.getElementById('svg-holder');
   player = PLAYER_X;
   xScores = [];
   oScores = [];
+  moveOk = true;
+  document.getElementById('loading').style.visibility = 'hidden';
   updateScoreReadout();
   draw();
+  ponderCurrent(); // start chewing on the opening position right away
 }
 /**
  * Set up the board and SVG holders, and request a move for X from the AI.
  */
 function initO() {
+  engineGen++; // cancel any engine-move poll still running from a previous game
   board = new Board();
-
-  var iMove = getMove(board.board, board.player, -1, -1);
-  let [cI, cJ, cII, cJJ] = [
-    iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF
-  ];  // Ugly bitpacking hack because I am so sick of JS
-
   xScores = [];
   oScores = [];
   updateScoreReadout();
-
-  board.move(cI, cJ, cII, cJJ);
-
   gridDiv = document.getElementById('svg-holder');
-  draw();
+  moveOk = false;
+  document.getElementById('loading').style.visibility = 'visible';
+  // The AI (X) opens, computed in the background; commitEngineMove draws the
+  // board and then ponders the human's (O's) reply.
+  requestEngineMove();
 }
 
 /**
@@ -127,34 +147,7 @@ function linkMoves(grid) {
  * @param {SVG} grid
  */
 function computerMove(grid) {
-  let [oI, oJ] = [-1, -1];
-  if (board.majorTile != null) {
-    [oI, oJ] = board.majorTile;
-  }
-  // Ask the engine for a move, but never spin forever. If it keeps handing back
-  // an unplayable move (e.g. the free-choice case, where you're sent to an
-  // already-won supercell), fall back to a known-valid move so the game can't
-  // lock up.
-  let played = false;
-  for (let attempt = 0; attempt < 8 && !played; attempt++) {
-    var iMove = getMove(board.board, board.player, oI, oJ);
-    [cI, cJ, cII, cJJ] =
-      [iMove >> 24 & 0xFF, iMove >> 16 & 0xFF, iMove >> 8 & 0xFF, iMove & 0xFF];
-    played = board.move(cI, cJ, cII, cJJ);
-  }
-  if (!played) {
-    let validMoves = board.getValidMoves();
-    if (validMoves.length) {
-      [cI, cJ, cII, cJJ] = validMoves[0];
-      board.move(cI, cJ, cII, cJJ);
-    }
-  }
-
-  drawScores();
-
-  draw();
-  document.getElementById('loading').style.visibility = 'hidden';
-  moveOk = true;
+  requestEngineMove();
 }
 /**
  * Draw and link the grid.
@@ -285,3 +278,161 @@ function drawScores() {
     console.error('drawScores: chart render failed', e);
   }
 }
+
+/**
+ * The active tile (forced subgrid) as [i, j], or [-1, -1] for a free move.
+ */
+function activeTile() {
+  return board.majorTile != null ? board.majorTile : [-1, -1];
+}
+
+/**
+ * Keep the background worker searching (pondering) the live position, including
+ * while it's the human's turn -- so when they move, the engine has a head start.
+ */
+function ponderCurrent() {
+  if (!runtimeReady || !board) return;
+  if (board.gameWinner() != PLAYER_NONE) return;
+  let [oI, oJ] = activeTile();
+  try { ponderBoard(board.board, board.player, oI, oJ); } catch (e) {}
+}
+
+/**
+ * Ask the engine to move WITHOUT blocking the UI: point the background search at
+ * the current position, then poll it each frame until it has searched enough (or
+ * the time budget elapses), and play the best move found.
+ */
+function requestEngineMove(retries) {
+  retries = retries || 0;
+  if (!runtimeReady) {
+    // Worker not constructed yet; wait for it rather than calling a null engine.
+    if (retries < 100) {
+      setTimeout(function () { requestEngineMove(retries + 1); }, 100);
+    } else {
+      finishTurn(); // give up gracefully after ~10s so the UI isn't stuck
+    }
+    return;
+  }
+  if (board.gameWinner() != PLAYER_NONE) {
+    drawScores();
+    finishTurn();
+    return;
+  }
+  let myGen = ++engineGen; // invalidates any older in-flight poll loop
+  let [oI, oJ] = activeTile();
+  try { ponderBoard(board.board, board.player, oI, oJ); } catch (e) {}
+  let base = 0;
+  try { base = nodeVisits(board.board, board.player, oI, oJ); } catch (e) {}
+  let start = performance.now();
+  (function poll() {
+    if (myGen !== engineGen) return; // a restart / newer request superseded us
+    let visits = base;
+    try { visits = nodeVisits(board.board, board.player, oI, oJ); } catch (e) {}
+    if ((visits - base) >= VISIT_TARGET || (performance.now() - start) >= TIME_BUDGET_MS) {
+      commitEngineMove(myGen);
+    } else {
+      requestAnimationFrame(poll);
+    }
+  })();
+}
+
+/**
+ * Play the best move the background search found; fall back to a known-valid move
+ * if the engine hands back something unplayable (e.g. the free-choice case).
+ */
+function commitEngineMove(myGen) {
+  if (myGen !== engineGen) return; // superseded by a newer request / restart
+  let [oI, oJ] = activeTile(); // re-derive from the live board, never a stale capture
+  let iMove = -1;
+  try { iMove = peekMove(board.board, board.player, oI, oJ); } catch (e) { iMove = -1; }
+  let cI = iMove >> 24 & 0xFF, cJ = iMove >> 16 & 0xFF, cII = iMove >> 8 & 0xFF, cJJ = iMove & 0xFF;
+  let played = board.move(cI, cJ, cII, cJJ);
+  if (!played) {
+    // Unsearched / unplayable best move: play a known-valid move so the game continues.
+    let validMoves = board.getValidMoves();
+    if (validMoves.length) {
+      let mv = validMoves[0];
+      board.move(mv[0], mv[1], mv[2], mv[3]);
+    }
+  }
+  drawScores();
+  finishTurn();
+  ponderCurrent(); // immediately start pondering the human's new position
+}
+
+/**
+ * Redraw, hide the spinner, and re-enable input.
+ */
+function finishTurn() {
+  draw();
+  document.getElementById('loading').style.visibility = 'hidden';
+  moveOk = true;
+}
+
+/**
+ * Format a count compactly (1234 -> 1k, 1200000 -> 1.2M).
+ */
+function fmtCount(n) {
+  if (!Number.isFinite(n)) return '0';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + 'k';
+  return '' + Math.round(n);
+}
+
+/**
+ * Realtime tree stats below the win probabilities: live node count, search
+ * throughput (rollouts/sec), and engine heap size.
+ */
+function updateTreeStats() {
+  let el = document.getElementById('tree-stats');
+  if (!el || !runtimeReady) return;
+  try {
+    let nodes = getTranspositionSize();
+    let roll = rolloutCount();
+    let now = performance.now();
+    if (prevStatsTime == 0) { prevStatsTime = now; prevRollouts = roll; }
+    let dt = (now - prevStatsTime) / 1000;
+    let rate = dt > 0 ? Math.max(0, (roll - prevRollouts) / dt) : 0;
+    prevStatsTime = now;
+    prevRollouts = roll;
+    let mem = 0;
+    try { mem = heapBytes(); } catch (e) {}
+    let memMB = Number.isFinite(mem) ? (mem / 1048576).toFixed(0) : '--';
+    el.innerHTML =
+      '<span class="stat">Nodes: ' + fmtCount(nodes) + '</span>' +
+      '<span class="stat">' + fmtCount(rate) + ' rollouts/s</span>' +
+      '<span class="stat">Heap: ' + memMB + ' MB</span>';
+  } catch (e) {}
+}
+
+/**
+ * Mark the engine ready (the worker exists) and start the perpetual stats loop.
+ */
+function onReady() {
+  if (runtimeReady) return;
+  runtimeReady = true;
+  prevStatsTime = 0;
+  if (!statsTimer) statsTimer = setInterval(updateTreeStats, 400);
+  ponderCurrent();
+}
+
+// Poll is_ready() until main() has constructed the worker, THEN start pondering
+// and stats. is_ready() touches no engine state (it just returns whether the
+// worker exists), so it's safe to call before the worker is built -- avoiding the
+// PROXY_TO_PTHREAD trap where onRuntimeInitialized can fire before main() finishes.
+(function () {
+  function pollReady() {
+    if (runtimeReady) return;
+    let ready = 0;
+    try { ready = isReady(); } catch (e) { ready = 0; }
+    if (ready) { onReady(); } else { setTimeout(pollReady, 60); }
+  }
+  if (typeof Module !== 'undefined' && !Module.calledRun) {
+    var prev = Module.onRuntimeInitialized;
+    Module.onRuntimeInitialized = function () {
+      if (typeof prev === 'function') prev();
+      pollReady();
+    };
+  }
+  setTimeout(pollReady, 300); // also covers calledRun==true and a missed hook
+})();

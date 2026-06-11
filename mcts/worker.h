@@ -7,7 +7,9 @@
 #include <thread>
 
 static constexpr int MAX_TREE_SIZE = 1048576;
-static constexpr int ITERS_PER_STEP = 16384;
+// Smaller batch == the worker re-checks for a board change (a new move to ponder)
+// more often, so it re-targets the live position with less latency.
+static constexpr int ITERS_PER_STEP = 4096;
 // Minimum number of fresh rollouts to accumulate on a position before
 // get_move() is allowed to commit to a move. This is the knob that trades move
 // latency for playing strength: too low and we move on a barely-searched tree.
@@ -29,7 +31,12 @@ public:
   float get_value(const Board &board);
   float get_win_prob(const Board &board);
   float get_tie_prob(const Board &board);
-  int transposition_table_size() const;
+  int transposition_table_size();
+
+  // Non-blocking API used by the pondering / polling UI.
+  grid_coord peek_move(const Board &board); // current best move, no wait
+  unsigned node_visits(const Board &board); // rollouts spent on this position so far
+  long long rollouts() const;               // cumulative MCTS rollouts (for rollouts/sec)
 
 protected:
   MCTSTree tree;
